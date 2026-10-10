@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
+import { requireDevice } from '@/lib/devices';
 
 export async function GET(request) {
   try {
@@ -10,13 +11,14 @@ export async function GET(request) {
     }
 
     const { searchParams } = new URL(request.url);
+    const device = await requireDevice(searchParams);
     const date_from  = searchParams.get('date_from');
     const date_to    = searchParams.get('date_to');
     const search     = searchParams.get('search');
     const department = searchParams.get('department');
 
-    const conditions = [];
-    const params = [];
+    const conditions = ['a.device_id = ?'];
+    const params = [device.id];
 
     if (date_from)  { conditions.push(`DATE(a.timestamp) >= ?`); params.push(date_from); }
     if (date_to)    { conditions.push(`DATE(a.timestamp) <= ?`); params.push(date_to); }
@@ -30,13 +32,14 @@ export async function GET(request) {
       SELECT
         DATE_FORMAT(a.timestamp, '%Y-%m-%d') AS tgl,
         a.uid                    AS uid,
-        COALESCE(MAX(e.name), CONCAT('UID_', a.uid)) AS nama,
+        COALESCE(MAX(e.name), MAX(de.display_name), CONCAT('UID_', a.uid)) AS nama,
         COALESCE(MAX(e.department), '-')              AS dept,
         DATE_FORMAT(MIN(a.timestamp), '%H:%i')  AS jam_masuk,
         DATE_FORMAT(MAX(a.timestamp), '%H:%i')  AS jam_keluar,
         TIMESTAMPDIFF(MINUTE, MIN(a.timestamp), MAX(a.timestamp)) AS dur_min,
         COUNT(a.id)              AS total_scan
       FROM attendance_logs a
+      LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
       LEFT JOIN employees e ON a.uid = e.uid
       ${where}
       GROUP BY DATE_FORMAT(a.timestamp, '%Y-%m-%d'), a.uid
@@ -143,7 +146,7 @@ export async function GET(request) {
     const totalCols = FIXED_COLS + (allDates.length * 2) + SUMMARY_COLS;
 
     // ── Baris 1: Judul ──────────────────────────────────────────────
-    set(R, 0, `Presensi Yayasan - ${periodLabel}`, {
+    set(R, 0, `Presensi Yayasan - ${device.code} - ${periodLabel}`, {
       font: { bold: true, sz: 14, name: 'Calibri', color: { rgb: CLR_TITLE_FG } },
       fill: { patternType: 'solid', fgColor: { rgb: 'E8F5EE' } },
       alignment: { horizontal: 'left', vertical: 'center' },
@@ -277,7 +280,7 @@ export async function GET(request) {
       { hpt: 16 }, // sub-header
     ];
 
-    const sheetName = `Presensi ${periodLabel}`.substring(0, 31);
+    const sheetName = `${device.code} ${periodLabel}`.substring(0, 31);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
     const labelFrom = date_from || 'awal';

@@ -33,6 +33,7 @@ export default function DashboardShell({ children, metrics }) {
   const navItems = [
     { href: "/", label: "Dasbor", icon: "dashboard" },
     { href: "/employees", label: "Karyawan", icon: "groups" },
+    ...(isSuperAdmin ? [{ href: "/devices", label: "Mesin", icon: "memory" }] : []),
     ...(isSuperAdmin ? [{ href: "/admins", label: "Admin", icon: "admin_panel_settings" }] : []),
   ];
 

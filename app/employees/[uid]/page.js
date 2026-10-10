@@ -15,6 +15,14 @@ export default function EmployeeProfile() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
+      let deviceId = sessionStorage.getItem("selectedDeviceId");
+      if (!deviceId) {
+        const devicesRes = await fetch("/api/devices");
+        const devicesJson = await devicesRes.json();
+        deviceId = devicesJson.data?.[0]?.id ? String(devicesJson.data[0].id) : "";
+        if (deviceId) sessionStorage.setItem("selectedDeviceId", deviceId);
+      }
+
       // 1. Get Employee Info
       const empRes = await fetch(`/api/employees`);
       if (empRes.ok) {
@@ -24,14 +32,18 @@ export default function EmployeeProfile() {
       }
 
       // 2. Get 7-Day Stats for this user
-      const statsRes = await fetch(`/api/stats?uid=${uid}`);
+      const statsRes = deviceId
+        ? await fetch(`/api/stats?uid=${encodeURIComponent(uid)}&device_id=${encodeURIComponent(deviceId)}`)
+        : null;
       if (statsRes.ok) {
         const statsJson = await statsRes.json();
         setChartData(statsJson.data || []);
       }
 
       // 3. Get Recent Logs for this user
-      const logsRes = await fetch(`/api/logs?search=${uid}&limit=10`);
+      const logsRes = deviceId
+        ? await fetch(`/api/logs?search=${encodeURIComponent(uid)}&limit=10&device_id=${encodeURIComponent(deviceId)}`)
+        : null;
       if (logsRes.ok) {
         const logsJson = await logsRes.json();
         setLogs(logsJson.data || []);

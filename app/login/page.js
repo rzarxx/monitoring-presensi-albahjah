@@ -31,7 +31,6 @@ export default function LoginPage() {
       }
 
       // Mulai sinkronisasi data di latar belakang — pengguna tidak perlu menunggu
-      fetch("/api/sync", { method: "POST" }).catch(() => {});
 
       sessionStorage.setItem("showWelcome", "true");
       router.push("/");

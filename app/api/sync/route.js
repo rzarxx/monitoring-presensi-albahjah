@@ -1,101 +1,60 @@
 import { NextResponse } from 'next/server';
-import pool, { query } from '@/lib/db';
+import { query } from '@/lib/db';
 import { getZkData } from '@/lib/zkteco';
 import { getUserSession } from '@/lib/auth';
+import { findDevice, parseDeviceId } from '@/lib/devices';
 
 export async function POST(request) {
   try {
-    // Hanya user yang sudah login yang bisa memicu sinkronisasi
     const user = await getUserSession(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Akses ditolak. Silakan login terlebih dahulu.' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Akses ditolak. Silakan login terlebih dahulu.' }, { status: 401 });
 
     const body = await request.json().catch(() => ({}));
-    const fullSync = body?.full === true;
+    const deviceId = parseDeviceId(body.device_id);
+    if (!deviceId) return NextResponse.json({ error: 'Pilih mesin untuk disinkronkan.' }, { status: 400 });
+    const device = await findDevice(deviceId);
+    if (!device) return NextResponse.json({ error: 'Mesin tidak ditemukan atau tidak aktif.' }, { status: 404 });
 
-    const { users, logs } = await getZkData();
+    const { users, logs } = await getZkData(device);
+    if (!logs?.length) return NextResponse.json({ message: 'Tidak ada data absensi dari mesin.', synced: 0, users_synced: 0 });
 
-    if (!logs || logs.length === 0) {
-      return NextResponse.json({ message: 'No attendance data from machine', synced: 0 });
-    }
-
-    // ── STEP 1: Tambah unique constraint bila belum ada ──────────────────────
-    try {
-      await query(`ALTER TABLE attendance_logs ADD UNIQUE KEY unique_scan (uid, timestamp)`);
-    } catch (e) { /* Sudah ada — abaikan */ }
-
-    // ── STEP 2: Sinkronisasi karyawan dari mesin ────────────────────────────
-    if (users && users.length > 0) {
-      for (const user of users) {
-        const uid = parseInt(user.userId, 10);
-        let name = (user.name || '').trim();
-        const department = (user.department || '').trim(); // Try to get department if available
-
-        // Abaikan user yang berawalan UID_ (sesuai request: jangan diambil karena data lama)
-        if (name.startsWith('UID_')) continue;
-        
-        if (!name) name = `User_${uid}`;
-        if (!uid || isNaN(uid)) continue;
-        
-        await query(
-          `INSERT INTO employees (uid, name, department) VALUES (?, ?, ?)
-           ON DUPLICATE KEY UPDATE name = VALUES(name), department = IF(VALUES(department) != '', VALUES(department), department)`,
-          [uid, name, department]
-        );
-      }
-    }
-
-    // ── STEP 3: Filter log ──────────────────────────────────────────────────
-    let newLogs = logs;
-    if (!fullSync) {
-      const rows = await query(`SELECT MAX(timestamp) as last_time FROM attendance_logs`);
-      const lastTime = rows[0].last_time;
-      if (lastTime) {
-        const lastTimeMs = new Date(lastTime).getTime();
-        newLogs = logs.filter(log => new Date(log.recordTime).getTime() > lastTimeMs);
-      }
-    }
-
-    if (newLogs.length === 0) {
-      return NextResponse.json({ message: 'Already up to date', synced: 0, users_synced: users?.length || 0 });
-    }
-
-    // ── STEP 4: Pastikan semua UID ada di employees ─────────────────────────
-    const allUids = [...new Set(newLogs.map(l => parseInt(l.deviceUserId, 10)).filter(u => !isNaN(u)))];
-    for (const uid of allUids) {
+    for (const machineUser of users || []) {
+      const uid = Number.parseInt(machineUser.userId, 10);
+      if (!Number.isInteger(uid)) continue;
       await query(
-        `INSERT IGNORE INTO employees (uid, name, department) VALUES (?, ?, '')`,
-        [uid, `UID_${uid}`]
+        `INSERT INTO device_enrollments (device_id, device_uid, display_name) VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)`,
+        [device.id, uid, String(machineUser.name || '').trim()]
       );
     }
 
-    // ── STEP 5: Bulk insert (INSERT IGNORE skip duplikat) ───────────────────
-    const values = newLogs.map(log => {
-      const uid = parseInt(log.deviceUserId, 10);
-      if (isNaN(uid)) return null;
-      const dt = new Date(log.recordTime);
-      const pad = (n) => String(n).padStart(2, '0');
-      const sqlTime = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
-      return [uid, sqlTime, log.state || 0];
+    let logsToSave = logs;
+    if (body.full !== true) {
+      const rows = await query(`SELECT MAX(timestamp) AS last_time FROM attendance_logs WHERE device_id = ?`, [device.id]);
+      if (rows[0]?.last_time) {
+        const lastTime = new Date(rows[0].last_time).getTime();
+        logsToSave = logs.filter((log) => new Date(log.recordTime).getTime() > lastTime);
+      }
+    }
+
+    const values = logsToSave.map((log) => {
+      const uid = Number.parseInt(log.deviceUserId, 10);
+      if (!Number.isInteger(uid)) return null;
+      const date = new Date(log.recordTime);
+      const pad = (value) => String(value).padStart(2, '0');
+      const timestamp = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+      return [device.id, uid, timestamp, log.state || 0];
     }).filter(Boolean);
 
-    const chunkSize = 5000;
     let totalInserted = 0;
-    for (let i = 0; i < values.length; i += chunkSize) {
-      const chunk = values.slice(i, i + chunkSize);
-      const result = await query(`INSERT IGNORE INTO attendance_logs (uid, timestamp, state) VALUES ?`, [chunk]);
+    for (let index = 0; index < values.length; index += 5000) {
+      const result = await query(`INSERT IGNORE INTO attendance_logs (device_id, uid, timestamp, state) VALUES ?`, [values.slice(index, index + 5000)]);
       totalInserted += result.affectedRows || 0;
     }
 
-    return NextResponse.json({
-      message: 'Sync berhasil',
-      synced: totalInserted,
-      users_synced: users?.length || 0,
-    });
-
+    return NextResponse.json({ message: 'Sinkronisasi berhasil.', synced: totalInserted, users_synced: users?.length || 0, device: { id: device.id, code: device.code, name: device.name } });
   } catch (error) {
     console.error('Sync Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Sinkronisasi gagal.' }, { status: 500 });
   }
 }

@@ -37,7 +37,16 @@ export default function Employees() {
 
   const fetchMetrics = async () => {
     try {
-      const res = await fetch("/api/logs");
+      let deviceId = sessionStorage.getItem("selectedDeviceId");
+      if (!deviceId) {
+        const devicesRes = await fetch("/api/devices");
+        const devicesJson = await devicesRes.json();
+        deviceId = devicesJson.data?.[0]?.id ? String(devicesJson.data[0].id) : "";
+        if (deviceId) sessionStorage.setItem("selectedDeviceId", deviceId);
+      }
+      if (!deviceId) return;
+
+      const res = await fetch(`/api/logs?device_id=${encodeURIComponent(deviceId)}`);
       const json = await res.json();
       if (json.metrics) setMetrics(json.metrics);
     } catch (e) { console.error(e); }

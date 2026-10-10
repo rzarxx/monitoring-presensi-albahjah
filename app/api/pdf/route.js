@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
+import { requireDevice } from '@/lib/devices';
 
 export async function GET(request) {
   try {
@@ -10,13 +11,14 @@ export async function GET(request) {
     }
 
     const { searchParams } = new URL(request.url);
+    const device = await requireDevice(searchParams);
     const date_from  = searchParams.get('date_from');
     const date_to    = searchParams.get('date_to');
     const search     = searchParams.get('search');
     const department = searchParams.get('department');
 
-    const conditions = [];
-    const params = [];
+    const conditions = ['a.device_id = ?'];
+    const params = [device.id];
     if (date_from)  { conditions.push(`DATE(a.timestamp) >= ?`); params.push(date_from); }
     if (date_to)    { conditions.push(`DATE(a.timestamp) <= ?`); params.push(date_to); }
     if (search)     { conditions.push(`(e.name LIKE ? OR CAST(a.uid AS CHAR) = ?)`); params.push(`%${search}%`, search); }
@@ -26,12 +28,13 @@ export async function GET(request) {
     const rows = await query(`
       SELECT
         DATE(a.timestamp)        AS tgl,
-        COALESCE(e.name, CONCAT('UID_', a.uid)) AS nama,
-        COALESCE(e.department, '-')              AS dept,
+        COALESCE(MAX(e.name), MAX(de.display_name), CONCAT('UID_', a.uid)) AS nama,
+        COALESCE(MAX(e.department), '-')              AS dept,
         MIN(a.timestamp)         AS jam_masuk,
         MAX(a.timestamp)         AS jam_keluar,
         COUNT(a.id)              AS total_scan
       FROM attendance_logs a
+      LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
       LEFT JOIN employees e ON a.uid = e.uid
       ${where}
       GROUP BY DATE(a.timestamp), a.uid
@@ -96,7 +99,7 @@ export async function GET(request) {
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Laporan Kehadiran — Absensi-AB</title>
+  <title>Laporan Kehadiran — ${device.code}</title>
 
   <!-- Font Awesome 6 -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous"/>
@@ -332,7 +335,7 @@ export async function GET(request) {
   <div class="toolbar">
     <div class="toolbar-title">
       <i class="fa-solid fa-file-lines"></i>
-      Pratinjau Laporan Kehadiran — Absensi-AB
+      Pratinjau Laporan Kehadiran — ${device.code}
     </div>
     <div class="toolbar-hint">
       <i class="fa-solid fa-circle-info"></i>
@@ -352,7 +355,7 @@ export async function GET(request) {
       <div class="doc-header-left">
         <img src="/logo.png" alt="Absensi-AB" style="width:52px;height:52px;object-fit:contain;filter:drop-shadow(0 4px 8px rgba(5,150,105,0.25));flex-shrink:0;"/>
         <div class="doc-title">
-          <h1>Laporan Kehadiran Karyawan</h1>
+          <h1>Laporan Kehadiran Karyawan — ${device.name}</h1>
           <p>
             <i class="fa-solid fa-fingerprint"></i>
             Absensi-AB &mdash; Sistem Monitoring Kehadiran Biometrik
@@ -361,6 +364,7 @@ export async function GET(request) {
       </div>
       <div class="doc-meta">
         <div><i class="fa-regular fa-clock"></i> <strong>Dicetak:</strong> ${printedAt}</div>
+        <div><i class="fa-solid fa-microchip"></i> <strong>Mesin:</strong> ${device.code}</div>
         <div><i class="fa-regular fa-calendar"></i> <strong>Periode:</strong> ${periodLabel}</div>
         ${department ? `<div><i class="fa-solid fa-building"></i> <strong>Departemen:</strong> ${department}</div>` : ''}
         ${search ? `<div><i class="fa-solid fa-magnifying-glass"></i> <strong>Pencarian:</strong> ${search}</div>` : ''}

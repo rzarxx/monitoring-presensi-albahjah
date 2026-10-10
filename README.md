@@ -68,6 +68,16 @@ Dashboard web untuk memantau presensi karyawan dari mesin sidik jari ZKTeco. Apl
 
    Buka `http://localhost:3000` lalu masuk memakai akun yang telah dibuat.
 
+## Mengaktifkan multi-mesin
+
+Untuk database yang sudah berisi data, lakukan backup database terlebih dahulu. Kemudian jalankan migrasi non-destruktif berikut satu kali:
+
+```bash
+npm run migrate:devices
+```
+
+Migrasi membuat segment, perangkat, dan pemetaan pengguna perangkat. Semua log lama dipertahankan dan dipetakan ke mesin `LEGACY-01`; tidak ada tabel presensi yang dihapus. Setelah itu, masuk sebagai Super Admin ke menu **Mesin** untuk membuat segment dan menambahkan perangkat Solution X105 atau X103. Data dasbor, sinkronisasi, statistik, serta ekspor dipilih per mesin.
+
 ## Konfigurasi environment
 
 | Variabel | Kegunaan |
@@ -134,6 +144,7 @@ Lakukan hard refresh pada browser setelah deploy agar aset lama dari cache tidak
 | `npm run lint` | Memeriksa aturan ESLint. |
 | `npm run build` | Membuat build production. |
 | `npm run start` | Menjalankan build production secara langsung. |
+| `npm run migrate:devices` | Menambahkan skema multi-mesin tanpa menghapus log lama. |
 
 ## Lisensi
 

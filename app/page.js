@@ -23,6 +23,8 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [machineStatus, setMachineStatus] = useState({ online: true, ip: "Memeriksa..." });
   const [chartData, setChartData] = useState([]);
+  const [devices, setDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
 
   // Clock
   useEffect(() => {
@@ -47,8 +49,24 @@ export default function Home() {
     sessionStorage.removeItem("showWelcome");
   };
 
+  useEffect(() => {
+    fetch("/api/devices")
+      .then((response) => response.json())
+      .then((json) => {
+        const availableDevices = json.data || [];
+        setDevices(availableDevices);
+        if (availableDevices.length) {
+          const savedDeviceId = sessionStorage.getItem("selectedDeviceId");
+          const selectedDevice = availableDevices.find((device) => String(device.id) === savedDeviceId);
+          setSelectedDeviceId(String((selectedDevice || availableDevices[0]).id));
+        }
+      })
+      .catch(() => setDevices([]));
+  }, []);
+
   // Fetch logs
   const fetchLogs = useCallback(async (isSilent = false) => {
+    if (!selectedDeviceId) return;
     if (!isSilent) setIsLoading(true);
     try {
       const params = new URLSearchParams();
@@ -57,6 +75,7 @@ export default function Home() {
       params.append("sortCol", sortConfig.col);
       params.append("sortDir", sortConfig.dir);
       params.append("page", page.toString());
+      params.append("device_id", selectedDeviceId);
       const res = await fetch("/api/logs?" + params.toString());
       if (!res.ok) return;
       const json = await res.json();
@@ -69,12 +88,13 @@ export default function Home() {
     } finally {
       if (!isSilent) setIsLoading(false);
     }
-  }, [filterDate, filterSearch, sortConfig, page]);
+  }, [filterDate, filterSearch, sortConfig, page, selectedDeviceId]);
 
   // Fetch machine status
   const fetchMachineStatus = useCallback(async () => {
+    if (!selectedDeviceId) return;
     try {
-      const res = await fetch("/api/machine/status");
+      const res = await fetch(`/api/machine/status?device_id=${selectedDeviceId}`);
       if (res.ok) {
         const data = await res.json();
         setMachineStatus(data);
@@ -84,22 +104,24 @@ export default function Home() {
     } catch (e) {
       setMachineStatus(s => ({ ...s, online: false }));
     }
-  }, []);
+  }, [selectedDeviceId]);
 
   const fetchChartData = useCallback(async () => {
+    if (!selectedDeviceId) return;
     try {
-      const res = await fetch("/api/stats");
+      const res = await fetch(`/api/stats?device_id=${selectedDeviceId}`);
       if (res.ok) {
         const json = await res.json();
         if (json.data) setChartData(json.data);
       }
     } catch (e) { console.error(e); }
-  }, []);
+  }, [selectedDeviceId]);
 
   // Auto-sync & Real-time setup
   const isSyncingRef = useRef(false);
 
   useEffect(() => {
+    if (!selectedDeviceId) return;
     // Initial fetch
     fetchLogs();
     fetchMachineStatus();
@@ -117,10 +139,14 @@ export default function Home() {
       clearInterval(statusIv);
       clearInterval(syncIv);
     };
-  }, [fetchLogs, fetchMachineStatus, fetchChartData]);
+  }, [fetchLogs, fetchMachineStatus, fetchChartData, selectedDeviceId]);
 
   // Manual & Silent sync (dengan Lock Guard agar tidak bertabrakan)
   const handleSync = async (full = false, silent = false) => {
+    if (!selectedDeviceId) {
+      if (!silent) setSyncModal({ open: true, success: false, message: "Pilih mesin terlebih dahulu." });
+      return;
+    }
     if (isSyncingRef.current) return;
     isSyncingRef.current = true;
     if (!silent) setIsSyncing(true);
@@ -128,7 +154,7 @@ export default function Home() {
       const res = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ full }),
+        body: JSON.stringify({ full, device_id: Number(selectedDeviceId) }),
       });
       const json = await res.json();
       
@@ -161,6 +187,8 @@ export default function Home() {
       if (exportModal.dateFrom)  params.append("date_from",  exportModal.dateFrom);
       if (exportModal.dateTo)    params.append("date_to",    exportModal.dateTo);
       if (exportModal.department) params.append("department", exportModal.department);
+      if (!selectedDeviceId) return;
+      params.append("device_id", selectedDeviceId);
 
       if (exportModal.format === 'pdf') {
         // Buka halaman PDF bersih di tab baru — user klik "Cetak / Simpan PDF"
@@ -190,6 +218,14 @@ export default function Home() {
             <p style={{ margin: "4px 0 0", fontSize: "11px", color: "var(--color-outline)", fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", letterSpacing: "0.08em" }}>
               Waktu Sistem: {timeStr}
             </p>
+            <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-primary)" }}>memory</span>
+              <select value={selectedDeviceId} onChange={(event) => { sessionStorage.setItem("selectedDeviceId", event.target.value); setSelectedDeviceId(event.target.value); setPage(1); }}
+                style={{ minWidth: "250px", padding: "9px 12px", border: "1px solid var(--color-outline-variant)", borderRadius: "8px", background: "var(--color-surface)", color: "var(--color-on-background)", fontWeight: 600 }}>
+                <option value="">Pilih mesin presensi</option>
+                {devices.map((device) => <option key={device.id} value={device.id}>{device.code} — {device.name}{device.segment_name ? ` (${device.segment_name})` : ''}</option>)}
+              </select>
+            </div>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <span style={{ fontSize: "12px", color: "var(--color-primary)", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px", background: "var(--color-surface-container-high)", padding: "6px 12px", borderRadius: "20px" }}>
@@ -231,7 +267,7 @@ export default function Home() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginTop: "24px", borderTop: "1px solid #c3c6d6", paddingTop: "20px" }}>
               <div>
                 <p style={{ margin: "0 0 4px", fontSize: "11px", fontFamily: "'JetBrains Mono', monospace", color: "var(--color-outline)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Titik Aktif</p>
-                <p style={{ margin: 0, fontSize: "20px", fontWeight: 600, color: "var(--color-on-background)" }}>1</p>
+                <p style={{ margin: 0, fontSize: "20px", fontWeight: 600, color: "var(--color-on-background)" }}>{selectedDeviceId ? '1' : '0'}</p>
               </div>
               <div>
                 <p style={{ margin: "0 0 4px", fontSize: "11px", fontFamily: "'JetBrains Mono', monospace", color: "var(--color-outline)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Status Koneksi</p>

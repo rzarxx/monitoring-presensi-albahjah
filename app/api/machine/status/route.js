@@ -1,45 +1,23 @@
 import { NextResponse } from 'next/server';
 import net from 'net';
 import { getUserSession } from '@/lib/auth';
+import { requireDevice } from '@/lib/devices';
 
 export async function GET(request) {
   try {
     const user = await getUserSession(request);
     if (!user) return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
-
-    const ip = process.env.ZK_IP || '192.168.1.100';
-    const port = parseInt(process.env.ZK_PORT || '4370', 10);
-
-    // Return a promise that resolves true if connected, false if error/timeout
-    const isOnline = await new Promise((resolve) => {
+    const device = await requireDevice(new URL(request.url).searchParams);
+    const online = await new Promise((resolve) => {
       const socket = new net.Socket();
-      
-      // Set timeout to 2 seconds for quick response
       socket.setTimeout(2000);
-
-      socket.on('connect', () => {
-        socket.destroy();
-        resolve(true);
-      });
-
-      socket.on('timeout', () => {
-        socket.destroy();
-        resolve(false);
-      });
-
-      socket.on('error', () => {
-        socket.destroy();
-        resolve(false);
-      });
-
-      socket.connect(port, ip);
+      socket.once('connect', () => { socket.destroy(); resolve(true); });
+      socket.once('timeout', () => { socket.destroy(); resolve(false); });
+      socket.once('error', () => { socket.destroy(); resolve(false); });
+      socket.connect(device.port, device.host);
     });
-
-    return NextResponse.json({
-      online: isOnline,
-      // IP & Port dihilangkan demi keamanan internal (tidak diekspos ke frontend)
-    });
+    return NextResponse.json({ online, device: { id: device.id, code: device.code, name: device.name } });
   } catch (error) {
-    return NextResponse.json({ online: false, error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Gagal memeriksa mesin.' }, { status: error.status || 500 });
   }
 }
