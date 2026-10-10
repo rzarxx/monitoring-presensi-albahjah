@@ -1,36 +1,140 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Monitoring Presensi Al-Bahjah
 
-## Getting Started
+Dashboard web untuk memantau presensi karyawan dari mesin sidik jari ZKTeco. Aplikasi ini membantu operator melihat log kehadiran, mengelola data karyawan dan admin, melakukan sinkronisasi mesin, serta mengunduh laporan.
 
-First, run the development server:
+## Fitur utama
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Dasbor pemantauan log scan dan ringkasan kehadiran hari ini.
+- Sinkronisasi data pengguna dan log dari mesin ZKTeco.
+- Status koneksi mesin absensi tanpa mengekspos IP internal ke browser.
+- Pengelolaan karyawan dan pemetaan UID perangkat.
+- Pengelolaan akun admin dengan peran `superadmin`, `sdm`, dan `admin`.
+- Pembatasan data per departemen untuk peran manager.
+- Catatan izin/cuti, laporan Excel, dan halaman cetak PDF.
+- Login berbasis cookie JWT dan proteksi rute aplikasi.
+
+## Teknologi
+
+- Next.js 16 (App Router) dan React 19
+- MySQL melalui `mysql2`
+- ZKTeco melalui `node-zklib`
+- Tailwind CSS 4 dan Recharts
+- PM2 untuk menjalankan proses production
+
+## Persyaratan
+
+- Node.js 20 atau lebih baru
+- npm
+- MySQL 8 atau yang kompatibel
+- Akses jaringan dari server aplikasi ke mesin ZKTeco
+
+## Instalasi lokal
+
+1. Clone repository lalu pasang dependensi.
+
+   ```bash
+   git clone https://github.com/rzarxx/monitoring-presensi-albahjah.git
+   cd monitoring-presensi-albahjah
+   npm ci
+   ```
+
+2. Buat file environment dari template.
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Pada Windows PowerShell gunakan:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+3. Isi `.env` dengan kredensial database, alamat mesin, akun bootstrap, dan `JWT_SECRET` yang kuat. Jangan pernah commit file `.env`.
+
+4. Siapkan database kosong lalu buat tabel awal.
+
+   ```bash
+   node scripts/init-db.js
+   ```
+
+   > Peringatan: perintah ini menghapus tabel `admins`, `employees`, `attendance_logs`, dan `leaves` pada database yang dikonfigurasi. Gunakan hanya pada database baru atau setelah backup terverifikasi.
+
+5. Jalankan mode pengembangan.
+
+   ```bash
+   npm run dev
+   ```
+
+   Buka `http://localhost:3000` lalu masuk memakai akun yang telah dibuat.
+
+## Konfigurasi environment
+
+| Variabel | Kegunaan |
+| --- | --- |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Koneksi MySQL. |
+| `ZK_IP`, `ZK_PORT` | Alamat mesin ZKTeco. |
+| `MOCK_ZK` | Gunakan `true` hanya untuk data contoh lokal. |
+| `ADMIN_USER`, `ADMIN_PASSWORD` | Akun bootstrap saat tabel admin belum berisi data. Gunakan nilai yang kuat. |
+| `JWT_SECRET` | Kunci penandatanganan sesi JWT; wajib unik dan rahasia. |
+| `NEXT_PUBLIC_APP_URL` | URL publik aplikasi, misalnya `https://absensi.example.org`. Nilai ini dipakai saat build untuk metadata publik. |
+
+## Cara menggunakan
+
+1. Masuk ke halaman `/login`.
+2. Pada dasbor, periksa status mesin dan gunakan **Sinkronkan** untuk menarik log terbaru.
+3. Kelola UID, nama, dan departemen karyawan melalui menu **Karyawan**.
+4. Superadmin dapat mengelola akun melalui menu **Admin**.
+5. Filter dan unduh laporan dari dasbor dalam format Excel atau PDF.
+
+## Struktur proyek
+
+```text
+app/                 Halaman Next.js, komponen, dan API route handlers
+app/api/             Endpoint autentikasi, sinkronisasi, laporan, dan data
+app/components/      Shell dashboard, modal, grafik, dan metrik
+lib/                 Koneksi MySQL, sesi, dan integrasi ZKTeco
+scripts/init-db.js   Inisialisasi ulang skema database (destruktif)
+public/              Logo dan aset publik
+proxy.js             Proteksi rute berbasis sesi JWT
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Build dan menjalankan production
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+Build menghasilkan bundle production di `.next`:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm run start
+```
 
-## Learn More
+Untuk server yang menggunakan PM2, jangan menjalankan `npm run start` secara manual jika proses sudah dikelola PM2. Setelah perubahan source:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run build
+pm2 restart presensi --update-env
+pm2 status presensi
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Lakukan hard refresh pada browser setelah deploy agar aset lama dari cache tidak tampil.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Keamanan operasional
 
-## Deploy on Vercel
+- Simpan semua kredensial hanya di `.env`; file tersebut sengaja diabaikan Git.
+- Gunakan `JWT_SECRET` acak yang panjang dan ganti akun bootstrap sebelum aplikasi dipakai.
+- Pastikan aplikasi memakai HTTPS. Cookie sesi production harus diamankan pada konfigurasi deployment.
+- Jangan menjalankan `scripts/init-db.js` pada database production tanpa backup yang dapat dipulihkan.
+- Batasi akses jaringan mesin ZKTeco hanya dari server aplikasi yang diperlukan.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Perintah yang tersedia
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Perintah | Kegunaan |
+| --- | --- |
+| `npm run dev` | Menjalankan server pengembangan. |
+| `npm run lint` | Memeriksa aturan ESLint. |
+| `npm run build` | Membuat build production. |
+| `npm run start` | Menjalankan build production secara langsung. |
+
+## Lisensi
+
+Belum ada lisensi publik yang ditetapkan. Hubungi pemilik repository sebelum menggunakan atau mendistribusikan ulang proyek ini.
