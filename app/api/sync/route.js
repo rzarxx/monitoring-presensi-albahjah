@@ -8,6 +8,7 @@ export async function POST(request) {
   try {
     const user = await getUserSession(request);
     if (!user) return NextResponse.json({ error: 'Akses ditolak. Silakan login terlebih dahulu.' }, { status: 401 });
+    if (!['superadmin', 'sdm'].includes(user.role)) return NextResponse.json({ error: 'Akses ditolak. Hanya Super Admin dan SDM yang dapat menjalankan sinkronisasi.' }, { status: 403 });
 
     const body = await request.json().catch(() => ({}));
     const deviceId = parseDeviceId(body.device_id);

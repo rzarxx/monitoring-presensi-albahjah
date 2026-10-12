@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
-import crypto from 'crypto';
+import { hashPassword, isValidPassword } from '@/lib/password';
 
 export async function PUT(request, { params }) {
   try {
@@ -27,10 +27,11 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: 'Username sudah digunakan' }, { status: 400 });
     }
 
-    const finalRole = ['admin', 'superadmin', 'sdm'].includes(role) ? role : 'admin';
+    const finalRole = ['admin', 'superadmin', 'sdm', 'manager'].includes(role) ? role : 'admin';
 
     if (password) {
-      const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+      if (!isValidPassword(password)) return NextResponse.json({ error: 'Password minimal 12 karakter.' }, { status: 422 });
+      const hashedPassword = await hashPassword(password);
       await query(
         `UPDATE admins SET username = ?, password = ?, role = ?, department = ? WHERE id = ?`,
         [username, hashedPassword, finalRole, department || '', id]

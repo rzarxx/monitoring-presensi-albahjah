@@ -15,7 +15,9 @@ export async function GET(request) {
     const date_from  = searchParams.get('date_from');
     const date_to    = searchParams.get('date_to');
     const search     = searchParams.get('search');
-    const department = searchParams.get('department');
+    const requestedDepartment = searchParams.get('department');
+    const department = user.role === 'manager' ? user.department : requestedDepartment;
+    if (user.role === 'manager' && !department) return NextResponse.json({ error: 'Akun manager belum memiliki departemen.' }, { status: 403 });
 
     const conditions = ['a.device_id = ?'];
     const params = [device.id];
@@ -40,7 +42,7 @@ export async function GET(request) {
         COUNT(a.id)              AS total_scan
       FROM attendance_logs a
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
-      LEFT JOIN employees e ON a.uid = e.uid
+      LEFT JOIN employees e ON e.uid = COALESCE(de.employee_uid, a.uid)
       ${where}
       GROUP BY DATE_FORMAT(a.timestamp, '%Y-%m-%d'), a.uid
       ORDER BY nama ASC, tgl ASC

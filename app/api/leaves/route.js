@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
+import { requireDevice } from '@/lib/devices';
+
+const leaveTypes = new Set(['Izin', 'Sakit', 'Cuti']);
 
 export async function GET(request) {
   try {
@@ -8,12 +11,16 @@ export async function GET(request) {
     if (!user) {
       return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
     }
+    const device = await requireDevice(new URL(request.url).searchParams);
+    const department = user.role === 'manager' ? user.department : null;
+    if (user.role === 'manager' && !department) return NextResponse.json({ error: 'Akun manager belum memiliki departemen.' }, { status: 403 });
     const leaves = await query(`
       SELECT l.*, e.name, e.department 
       FROM leaves l 
       LEFT JOIN employees e ON l.uid = e.uid
+      WHERE l.device_id = ?${department ? ' AND e.department = ?' : ''}
       ORDER BY l.date DESC
-    `);
+    `, department ? [device.id, department] : [device.id]);
     return NextResponse.json({ data: leaves });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -23,13 +30,16 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const user = await getUserSession(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
-    }
+    if (!user || !['superadmin', 'sdm'].includes(user.role)) return NextResponse.json({ error: 'Akses ditolak.' }, { status: 403 });
 
-    const { uid, date, type, reason } = await request.json();
-    if (!uid || !date || !type) {
-      return NextResponse.json({ error: 'UID, Tanggal, dan Tipe wajib diisi.' }, { status: 400 });
+    const body = await request.json();
+    const device = await requireDevice(new URL(request.url).searchParams);
+    const uid = Number.parseInt(body.uid, 10);
+    const date = String(body.date || '');
+    const type = String(body.type || '');
+    const reason = String(body.reason || '').trim();
+    if (!Number.isInteger(uid) || uid < 1 || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !leaveTypes.has(type) || reason.length > 1000) {
+      return NextResponse.json({ error: 'Data izin/cuti tidak valid.' }, { status: 422 });
     }
 
     const emp = await query(`SELECT * FROM employees WHERE uid = ?`, [uid]);
@@ -37,11 +47,11 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Karyawan tidak ditemukan.' }, { status: 404 });
     }
 
-    const existing = await query(`SELECT * FROM leaves WHERE uid = ? AND date = ?`, [uid, date]);
+    const existing = await query(`SELECT id FROM leaves WHERE device_id = ? AND uid = ? AND date = ?`, [device.id, uid, date]);
     if (existing.length > 0) {
-      await query(`UPDATE leaves SET type = ?, reason = ? WHERE uid = ? AND date = ?`, [type, reason || '', uid, date]);
+      await query(`UPDATE leaves SET type = ?, reason = ? WHERE id = ?`, [type, reason, existing[0].id]);
     } else {
-      await query(`INSERT INTO leaves (uid, date, type, reason) VALUES (?, ?, ?, ?)`, [uid, date, type, reason || '']);
+      await query(`INSERT INTO leaves (device_id, uid, date, type, reason) VALUES (?, ?, ?, ?, ?)`, [device.id, uid, date, type, reason]);
     }
 
     return NextResponse.json({ success: true, message: 'Izin/Cuti berhasil disimpan.' });
@@ -59,16 +69,16 @@ export async function DELETE(request) {
     }
 
     const { searchParams } = new URL(request.url);
+    const device = await requireDevice(searchParams);
     const id = searchParams.get('id');
 
     if (!id) {
       return NextResponse.json({ error: 'ID wajib disertakan.' }, { status: 400 });
     }
 
-    await query(`DELETE FROM leaves WHERE id = ?`, [id]);
+    await query(`DELETE FROM leaves WHERE id = ? AND device_id = ?`, [id, device.id]);
     return NextResponse.json({ success: true, message: 'Data berhasil dihapus.' });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-

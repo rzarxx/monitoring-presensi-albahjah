@@ -11,7 +11,6 @@ export default function Home() {
   const [report, setReport] = useState([]);
   const [metrics, setMetrics] = useState({ totalScansToday: 0, authorized: 0, unauthorized: 0 });
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncBg, setSyncBg] = useState(true);
   const [filterDate, setFilterDate] = useState("");
   const [filterSearch, setFilterSearch] = useState("");
   const [sortConfig, setSortConfig] = useState({ col: 'date', dir: 'desc' });
@@ -25,6 +24,7 @@ export default function Home() {
   const [chartData, setChartData] = useState([]);
   const [devices, setDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [canSync, setCanSync] = useState(false);
 
   // Clock
   useEffect(() => {
@@ -40,6 +40,8 @@ export default function Home() {
   // Check Welcome on Mount
   useEffect(() => {
     if (sessionStorage.getItem("showWelcome") === "true") {
+      // Nilai berasal dari session browser dan hanya diterapkan saat mount.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setWelcomeModal(true);
     }
   }, []);
@@ -48,6 +50,13 @@ export default function Home() {
     setWelcomeModal(false);
     sessionStorage.removeItem("showWelcome");
   };
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((response) => response.ok ? response.json() : null)
+      .then((json) => setCanSync(['superadmin', 'sdm'].includes(json?.user?.role)))
+      .catch(() => setCanSync(false));
+  }, []);
 
   useEffect(() => {
     fetch("/api/devices")
@@ -123,26 +132,29 @@ export default function Home() {
   useEffect(() => {
     if (!selectedDeviceId) return;
     // Initial fetch
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchLogs();
     fetchMachineStatus();
     fetchChartData();
     
-    // Auto sync silently on mount
-    handleSync(false, true);
-
     // Poll status jaringan tiap 15 detik
     const statusIv = setInterval(fetchMachineStatus, 15000);
-    // Auto-sync latar belakang tiap 60 detik (jika tidak sedang berjalan)
-    const syncIv = setInterval(() => handleSync(false, true), 60000);
+    let syncIv;
+    if (canSync) {
+      // Auto sync hanya untuk peran yang berwenang.
+      handleSync(false, true);
+      syncIv = setInterval(() => handleSync(false, true), 60000);
+    }
 
     return () => {
       clearInterval(statusIv);
-      clearInterval(syncIv);
+      if (syncIv) clearInterval(syncIv);
     };
-  }, [fetchLogs, fetchMachineStatus, fetchChartData, selectedDeviceId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchLogs, fetchMachineStatus, fetchChartData, selectedDeviceId, canSync]);
 
   // Manual & Silent sync (dengan Lock Guard agar tidak bertabrakan)
-  const handleSync = async (full = false, silent = false) => {
+  async function handleSync(full = false, silent = false) {
     if (!selectedDeviceId) {
       if (!silent) setSyncModal({ open: true, success: false, message: "Pilih mesin terlebih dahulu." });
       return;
@@ -177,7 +189,7 @@ export default function Home() {
       isSyncingRef.current = false;
       if (!silent) setIsSyncing(false);
     }
-  };
+  }
 
   // Excel / PDF download
   const handleExportSubmit = async (e) => {
@@ -228,20 +240,22 @@ export default function Home() {
             </div>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "12px", color: "var(--color-primary)", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px", background: "var(--color-surface-container-high)", padding: "6px 12px", borderRadius: "20px" }}>
+            {canSync && <span style={{ fontSize: "12px", color: "var(--color-primary)", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px", background: "var(--color-surface-container-high)", padding: "6px 12px", borderRadius: "20px" }}>
               <span className="status-pulse" style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--color-primary)" }} />
               Realtime Auto-Sync Aktif
-            </span>
-            <button onClick={() => handleSync(true)} disabled={isSyncing}
-              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 16px", background: "var(--color-surface-variant)", border: "1px solid #c3c6d6", borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "var(--color-primary)", cursor: "pointer" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>history</span>
-              Sinkronkan Semua Data
+            </span>}
+            {canSync && <>
+            <button onClick={() => handleSync(true)} disabled={isSyncing} aria-busy={isSyncing}
+              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 16px", background: "var(--color-surface-variant)", border: "1px solid #c3c6d6", borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "var(--color-primary)", cursor: isSyncing ? "wait" : "pointer", opacity: isSyncing ? 0.72 : 1, transition: "opacity 0.2s" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: "16px", animation: isSyncing ? "spin 1s linear infinite" : "none" }}>{isSyncing ? "progress_activity" : "history"}</span>
+              {isSyncing ? "Sedang menyinkronkan..." : "Sinkronkan Semua Data"}
             </button>
-            <button onClick={() => handleSync(false)} disabled={isSyncing}
-              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 16px", background: "var(--color-primary)", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "var(--color-surface)", cursor: "pointer", boxShadow: "0 2px 8px rgba(0,61,155,0.3)" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: "16px", animation: isSyncing ? "spin 1s linear infinite" : "none" }}>sync</span>
-              {isSyncing ? "Memproses..." : "Sinkronkan Data Terbaru"}
+            <button onClick={() => handleSync(false)} disabled={isSyncing} aria-busy={isSyncing}
+              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 16px", background: "var(--color-primary)", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "var(--color-surface)", cursor: isSyncing ? "wait" : "pointer", opacity: isSyncing ? 0.78 : 1, transition: "opacity 0.2s", boxShadow: "0 2px 8px rgba(0,61,155,0.3)" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: "16px", animation: isSyncing ? "spin 1s linear infinite" : "none" }}>{isSyncing ? "progress_activity" : "sync"}</span>
+              {isSyncing ? "Sedang menyinkronkan..." : "Sinkronkan Data Terbaru"}
             </button>
+            </>}
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter, usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import MetricBar from "@/app/components/MetricBar";
@@ -82,9 +83,11 @@ export default function DashboardShell({ children, metrics }) {
         }}>
           {/* Logo */}
           <Link href="/" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none" }}>
-            <img
+            <Image
               src="/logo.png"
               alt="PRESENSI YAYASAN Logo"
+              width={36}
+              height={36}
               style={{
                 width: "36px",
                 height: "36px",

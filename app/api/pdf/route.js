@@ -15,7 +15,9 @@ export async function GET(request) {
     const date_from  = searchParams.get('date_from');
     const date_to    = searchParams.get('date_to');
     const search     = searchParams.get('search');
-    const department = searchParams.get('department');
+    const requestedDepartment = searchParams.get('department');
+    const department = user.role === 'manager' ? user.department : requestedDepartment;
+    if (user.role === 'manager' && !department) return NextResponse.json({ error: 'Akun manager belum memiliki departemen.' }, { status: 403 });
 
     const conditions = ['a.device_id = ?'];
     const params = [device.id];
@@ -35,13 +37,14 @@ export async function GET(request) {
         COUNT(a.id)              AS total_scan
       FROM attendance_logs a
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
-      LEFT JOIN employees e ON a.uid = e.uid
+      LEFT JOIN employees e ON e.uid = COALESCE(de.employee_uid, a.uid)
       ${where}
       GROUP BY DATE(a.timestamp), a.uid
       ORDER BY DATE(a.timestamp) ASC, e.name ASC
     `, params);
 
     const pad = (n) => String(n).padStart(2, '0');
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[character]);
     const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
     const DAYS   = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
 
@@ -83,8 +86,8 @@ export async function GET(request) {
       return `
         <tr style="background:${rowBg};">
           <td class="td">${formatDate(r.tgl)}</td>
-          <td class="td" style="font-weight:700;color:#0f172a;">${r.nama}</td>
-          <td class="td" style="color:#64748b;">${r.dept}</td>
+          <td class="td" style="font-weight:700;color:#0f172a;">${escapeHtml(r.nama)}</td>
+          <td class="td" style="color:#64748b;">${escapeHtml(r.dept)}</td>
           <td class="td tc" style="font-weight:700;color:#059669;">${formatTime(r.jam_masuk)}</td>
           <td class="td tc">${isSame || !checkOut ? '<span style="color:#94a3b8;font-style:italic;font-size:10px;">Belum Absen</span>' : formatTime(r.jam_keluar)}</td>
           <td class="td tc" style="color:#475569;">${durStr}</td>
@@ -99,7 +102,7 @@ export async function GET(request) {
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Laporan Kehadiran — ${device.code}</title>
+  <title>Laporan Kehadiran — ${escapeHtml(device.name)}</title>
 
   <!-- Font Awesome 6 -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous"/>
@@ -335,7 +338,7 @@ export async function GET(request) {
   <div class="toolbar">
     <div class="toolbar-title">
       <i class="fa-solid fa-file-lines"></i>
-      Pratinjau Laporan Kehadiran — ${device.code}
+      Pratinjau Laporan Kehadiran — ${escapeHtml(device.name)}
     </div>
     <div class="toolbar-hint">
       <i class="fa-solid fa-circle-info"></i>
@@ -355,7 +358,7 @@ export async function GET(request) {
       <div class="doc-header-left">
         <img src="/logo.png" alt="Absensi-AB" style="width:52px;height:52px;object-fit:contain;filter:drop-shadow(0 4px 8px rgba(5,150,105,0.25));flex-shrink:0;"/>
         <div class="doc-title">
-          <h1>Laporan Kehadiran Karyawan — ${device.name}</h1>
+          <h1>Laporan Kehadiran Karyawan — ${escapeHtml(device.name)}</h1>
           <p>
             <i class="fa-solid fa-fingerprint"></i>
             Absensi-AB &mdash; Sistem Monitoring Kehadiran Biometrik
@@ -364,10 +367,10 @@ export async function GET(request) {
       </div>
       <div class="doc-meta">
         <div><i class="fa-regular fa-clock"></i> <strong>Dicetak:</strong> ${printedAt}</div>
-        <div><i class="fa-solid fa-microchip"></i> <strong>Mesin:</strong> ${device.code}</div>
-        <div><i class="fa-regular fa-calendar"></i> <strong>Periode:</strong> ${periodLabel}</div>
-        ${department ? `<div><i class="fa-solid fa-building"></i> <strong>Departemen:</strong> ${department}</div>` : ''}
-        ${search ? `<div><i class="fa-solid fa-magnifying-glass"></i> <strong>Pencarian:</strong> ${search}</div>` : ''}
+        <div><i class="fa-solid fa-microchip"></i> <strong>Mesin:</strong> ${escapeHtml(device.name)}</div>
+        <div><i class="fa-regular fa-calendar"></i> <strong>Periode:</strong> ${escapeHtml(periodLabel)}</div>
+        ${department ? `<div><i class="fa-solid fa-building"></i> <strong>Departemen:</strong> ${escapeHtml(department)}</div>` : ''}
+        ${search ? `<div><i class="fa-solid fa-magnifying-glass"></i> <strong>Pencarian:</strong> ${escapeHtml(search)}</div>` : ''}
       </div>
     </div>
 
@@ -375,12 +378,12 @@ export async function GET(request) {
     <div class="info-bar">
       <div class="info-chip">
         <i class="fa-solid fa-calendar-range"></i>
-        Periode: <strong>${periodLabel}</strong>
+        Periode: <strong>${escapeHtml(periodLabel)}</strong>
       </div>
-      ${department ? `<div class="info-chip"><i class="fa-solid fa-building"></i> Departemen: <strong>${department}</strong></div>` : ''}
+      ${department ? `<div class="info-chip"><i class="fa-solid fa-building"></i> Departemen: <strong>${escapeHtml(department)}</strong></div>` : ''}
       <div class="info-chip">
         <i class="fa-solid fa-user"></i>
-        Dicetak oleh: <strong>${user.username}</strong>
+        Dicetak oleh: <strong>${escapeHtml(user.username)}</strong>
       </div>
     </div>
 

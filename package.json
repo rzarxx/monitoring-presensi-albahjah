@@ -10,11 +10,9 @@
     "migrate:devices": "node scripts/migrate-multi-device.js"
   },
   "dependencies": {
-    "date-fns": "^4.4.0",
-    "html2pdf.js": "^0.14.0",
     "jose": "^6.2.8",
     "mysql2": "^3.23.2",
-    "next": "16.3.0",
+    "next": "16.4.0",
     "node-zklib": "^1.3.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -25,7 +23,7 @@
     "@tailwindcss/postcss": "^4",
     "dotenv": "^17.4.2",
     "eslint": "^9",
-    "eslint-config-next": "16.3.0",
+    "eslint-config-next": "^16.4.0",
     "tailwindcss": "^4"
   }
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -58,9 +59,11 @@ export default function LoginPage() {
         {/* Logo & Identitas Sistem */}
         <div style={{ textAlign: "center", marginBottom: "32px" }}>
           <div style={{ marginBottom: "16px", display: "flex", justifyContent: "center" }}>
-            <img
+            <Image
               src="/logo.png"
               alt="PRESENSI YAYASAN"
+              width={80}
+              height={80}
               style={{
                 width: "80px",
                 height: "80px",

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
-import crypto from 'crypto';
+import { hashPassword, isValidPassword } from '@/lib/password';
 
 export async function POST(request, { params }) {
   try {
@@ -17,8 +17,9 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: 'ID admin tidak valid' }, { status: 400 });
     }
 
-    const defaultPassword = 'admin123';
-    const hashedPassword = crypto.createHash('sha256').update(defaultPassword).digest('hex');
+    const { password } = await request.json();
+    if (!isValidPassword(password)) return NextResponse.json({ error: 'Password baru minimal 12 karakter.' }, { status: 422 });
+    const hashedPassword = await hashPassword(password);
 
     const result = await query(
       'UPDATE admins SET password = ? WHERE id = ?',
@@ -29,7 +30,7 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: 'Admin tidak ditemukan' }, { status: 404 });
     }
 
-    return NextResponse.json({ message: 'Password berhasil direset menjadi "admin123"' });
+    return NextResponse.json({ message: 'Password berhasil direset.' });
   } catch (error) {
     console.error('[API/admins/[id]/reset]', error);
     return NextResponse.json({ error: 'Gagal mereset password' }, { status: 500 });

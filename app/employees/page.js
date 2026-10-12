@@ -5,6 +5,16 @@ import DashboardShell from "@/app/components/DashboardShell";
 import Modal from "@/app/components/Modal";
 import Link from "next/link";
 
+async function resolveSelectedDeviceId() {
+  let deviceId = sessionStorage.getItem("selectedDeviceId");
+  if (deviceId) return deviceId;
+  const devicesRes = await fetch("/api/devices");
+  const devicesJson = await devicesRes.json();
+  deviceId = devicesJson.data?.[0]?.id ? String(devicesJson.data[0].id) : "";
+  if (deviceId) sessionStorage.setItem("selectedDeviceId", deviceId);
+  return deviceId;
+}
+
 export default function Employees() {
   const [employees, setEmployees] = useState([]);
   const [metrics, setMetrics] = useState({});
@@ -37,13 +47,7 @@ export default function Employees() {
 
   const fetchMetrics = async () => {
     try {
-      let deviceId = sessionStorage.getItem("selectedDeviceId");
-      if (!deviceId) {
-        const devicesRes = await fetch("/api/devices");
-        const devicesJson = await devicesRes.json();
-        deviceId = devicesJson.data?.[0]?.id ? String(devicesJson.data[0].id) : "";
-        if (deviceId) sessionStorage.setItem("selectedDeviceId", deviceId);
-      }
+      const deviceId = await resolveSelectedDeviceId();
       if (!deviceId) return;
 
       const res = await fetch(`/api/logs?device_id=${encodeURIComponent(deviceId)}`);
@@ -66,6 +70,8 @@ export default function Employees() {
   const isSuperAdmin = userLoaded && (currentUser?.role === 'superadmin' || currentUser?.role === 'sdm');
 
   useEffect(() => {
+    // Data dimuat setelah komponen tersedia; tiap fungsi memperbarui state dari respons asynchronous.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchEmployees();
     fetchMetrics();
     fetchCurrentUser();
@@ -134,7 +140,9 @@ export default function Employees() {
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/leaves", {
+      const deviceId = await resolveSelectedDeviceId();
+      if (!deviceId) throw new Error("Pilih mesin presensi terlebih dahulu.");
+      const res = await fetch(`/api/leaves?device_id=${encodeURIComponent(deviceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

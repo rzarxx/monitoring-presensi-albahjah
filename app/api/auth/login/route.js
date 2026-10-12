@@ -1,11 +1,17 @@
 import { NextResponse } from 'next/server';
 import { SignJWT } from 'jose';
 import { query } from '@/lib/db';
-import crypto from 'crypto';
+import { getJwtSecret } from '@/lib/auth';
+import { hashPassword, verifyPassword } from '@/lib/password';
 
 export async function POST(request) {
   try {
     const { username, password } = await request.json();
+    if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password) {
+      return NextResponse.json({ error: 'Username dan password wajib diisi.' }, { status: 422 });
+    }
+    const secret = getJwtSecret();
+    if (!secret) return NextResponse.json({ error: 'Konfigurasi sesi server belum aman.' }, { status: 503 });
 
     let payload = { username, role: 'superadmin', department: '' };
 
@@ -14,42 +20,34 @@ export async function POST(request) {
     try {
       const admins = await query(`SELECT * FROM admins WHERE username = ?`, [username]);
       if (admins.length > 0) {
-        // Hash password menggunakan SHA256
-        const hash = crypto.createHash('sha256').update(password).digest('hex');
-        
-        // Cek password hash atau plain text (sebagai transisi/fallback)
-        if (admins[0].password === hash || admins[0].password === password) {
+        const verification = await verifyPassword(password, admins[0].password);
+        if (verification.valid) {
           isValid = true;
           payload.role = admins[0].role || 'superadmin';
           payload.department = admins[0].department || '';
+          if (verification.upgrade) {
+            await query('UPDATE admins SET password = ? WHERE id = ?', [await hashPassword(password), admins[0].id]);
+          }
         }
       } else {
-        // Fallback ke .env jika tabel admin kosong
+        // Akun bootstrap hanya berlaku saat database admin benar-benar kosong.
         const totalAdmins = await query(`SELECT COUNT(*) as count FROM admins`);
         if (totalAdmins[0].count === 0) {
-          const validUser = process.env.ADMIN_USER || 'admin';
-          const validPass = process.env.ADMIN_PASSWORD || 'admin123';
-          const hash = crypto.createHash('sha256').update(password).digest('hex');
-          if (username === validUser && (validPass === hash || validPass === password)) {
+          const validUser = process.env.ADMIN_USER;
+          const validPass = process.env.ADMIN_PASSWORD;
+          if (validUser && validPass && username === validUser && password === validPass) {
             isValid = true;
           }
         }
       }
-    } catch (dbError) {
-      // Fallback jika database error
-      const validUser = process.env.ADMIN_USER || 'admin';
-      const validPass = process.env.ADMIN_PASSWORD || 'admin123';
-      const hash = crypto.createHash('sha256').update(password).digest('hex');
-      if (username === validUser && (validPass === hash || validPass === password)) {
-        isValid = true;
-      }
+    } catch {
+      return NextResponse.json({ error: 'Layanan autentikasi sedang tidak tersedia.' }, { status: 503 });
     }
 
     if (!isValid) {
       return NextResponse.json({ error: 'Username atau password salah.' }, { status: 401 });
     }
 
-    const secret = new TextEncoder().encode(process.env.JWT_SECRET || 'fallback-secret');
     const token = await new SignJWT(payload)
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
@@ -59,7 +57,7 @@ export async function POST(request) {
     const response = NextResponse.json({ message: 'Login berhasil' });
     response.cookies.set('auth_token', token, {
       httpOnly: true,
-      secure: false, // set true jika sudah HTTPS
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 60 * 60 * 8, // 8 jam
       path: '/',

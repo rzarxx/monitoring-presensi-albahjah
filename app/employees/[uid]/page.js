@@ -35,7 +35,7 @@ export default function EmployeeProfile() {
       const statsRes = deviceId
         ? await fetch(`/api/stats?uid=${encodeURIComponent(uid)}&device_id=${encodeURIComponent(deviceId)}`)
         : null;
-      if (statsRes.ok) {
+      if (statsRes?.ok) {
         const statsJson = await statsRes.json();
         setChartData(statsJson.data || []);
       }
@@ -44,7 +44,7 @@ export default function EmployeeProfile() {
       const logsRes = deviceId
         ? await fetch(`/api/logs?search=${encodeURIComponent(uid)}&limit=10&device_id=${encodeURIComponent(deviceId)}`)
         : null;
-      if (logsRes.ok) {
+      if (logsRes?.ok) {
         const logsJson = await logsRes.json();
         setLogs(logsJson.data || []);
       }
@@ -57,6 +57,7 @@ export default function EmployeeProfile() {
   }, [uid]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   }, [fetchData]);
 

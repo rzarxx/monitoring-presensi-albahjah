@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
-import crypto from 'crypto';
+import { hashPassword, isValidPassword } from '@/lib/password';
 
 // GET - Hanya superadmin yang bisa melihat daftar akun
 export async function GET(request) {
@@ -27,12 +27,12 @@ export async function POST(request) {
 
     const { username, password, role, department } = await request.json();
 
-    if (!username || !password) {
-      return NextResponse.json({ error: 'Username dan password wajib diisi.' }, { status: 400 });
+    if (!username || !isValidPassword(password)) {
+      return NextResponse.json({ error: 'Username wajib diisi dan password minimal 12 karakter.' }, { status: 422 });
     }
 
     // Validasi role yang diperbolehkan
-    const allowedRoles = ['admin', 'superadmin', 'sdm'];
+    const allowedRoles = ['admin', 'superadmin', 'sdm', 'manager'];
     const finalRole = allowedRoles.includes(role) ? role : 'admin';
     
     const check = await query(`SELECT id FROM admins WHERE username = ?`, [username]);
@@ -40,8 +40,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Username sudah digunakan.' }, { status: 400 });
     }
 
-    // Hash password sebelum disimpan
-    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+    const hashedPassword = await hashPassword(password);
 
     const result = await query(
       `INSERT INTO admins (username, password, role, department) VALUES (?, ?, ?, ?)`,
@@ -53,4 +52,3 @@ export async function POST(request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-

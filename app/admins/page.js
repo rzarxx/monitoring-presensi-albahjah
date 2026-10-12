@@ -11,13 +11,14 @@ export default function Admins() {
   const [formData, setFormData] = useState({ username: '', password: '', role: 'admin', department: '' });
   const [alertMsg, setAlertMsg] = useState(null);
   const [confirmModal, setConfirmModal] = useState({ open: false, type: '', data: null, title: '', message: '' });
+  const [resetPassword, setResetPassword] = useState('');
   const [sortConfig, setSortConfig] = useState({ col: null, dir: 'asc' });
 
   useEffect(() => {
     fetchAdmins();
   }, []);
 
-  const fetchAdmins = async () => {
+  async function fetchAdmins() {
     setLoading(true);
     try {
       const res = await fetch("/api/admins");
@@ -30,7 +31,7 @@ export default function Admins() {
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -59,10 +60,11 @@ export default function Admins() {
 
   const handleResetPassword = async (id) => {
     try {
-      const res = await fetch(`/api/admins/${id}/reset`, { method: 'POST' });
+      const res = await fetch(`/api/admins/${id}/reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: resetPassword }) });
       const json = await res.json();
       if (res.ok) {
         setAlertMsg({ type: 'success', text: json.message });
+        setResetPassword('');
       } else {
         setAlertMsg({ type: 'error', text: json.error });
       }
@@ -204,7 +206,7 @@ export default function Admins() {
                     </td>
                     <td style={{ padding: "16px", fontSize: "14px", color: "var(--color-on-surface-variant)" }}>{new Date(admin.created_at).toLocaleDateString('id-ID')}</td>
                     <td style={{ padding: "16px", textAlign: "right" }}>
-                      <button onClick={() => setConfirmModal({ open: true, type: 'reset', data: admin.id, title: 'Reset Password', message: "Apakah Anda yakin ingin mereset password admin ini menjadi 'admin123'?" })} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--color-secondary)", padding: "4px", marginRight: "8px" }} title="Reset Password ke default">
+                      <button onClick={() => { setResetPassword(''); setConfirmModal({ open: true, type: 'reset', data: admin.id, title: 'Reset Password', message: 'Tentukan password baru yang kuat untuk admin ini.' }); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--color-secondary)", padding: "4px", marginRight: "8px" }} title="Reset Password">
                         <span className="material-symbols-outlined">lock_reset</span>
                       </button>
                       <button onClick={() => openModal('edit', admin)} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--color-primary)", padding: "4px", marginRight: "8px" }} title="Edit Admin">
@@ -235,8 +237,9 @@ export default function Admins() {
             <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: 600, color: "var(--color-outline)" }}>
               Password {modal.mode === 'edit' && <span style={{ fontWeight: 400 }}>(Kosongkan jika tidak ingin diubah)</span>}
             </label>
-            <input type="password" required={modal.mode === 'add'} value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })}
+            <input type="password" required={modal.mode === 'add'} minLength="12" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })}
               style={{ width: "100%", padding: "10px 14px", border: "1.5px solid var(--color-outline-variant)", borderRadius: "8px", fontSize: "14px", outline: "none", background: "var(--color-surface)" }} />
+            <small style={{ display: 'block', marginTop: '5px', color: 'var(--color-outline)', fontSize: '11px' }}>Minimal 12 karakter.</small>
           </div>
           <div>
             <label style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: 600, color: "var(--color-outline)" }}>Role</label>
@@ -244,6 +247,7 @@ export default function Admins() {
               style={{ width: "100%", padding: "10px 14px", border: "1.5px solid var(--color-outline-variant)", borderRadius: "8px", fontSize: "14px", outline: "none", background: "var(--color-surface)" }}>
               <option value="admin">Admin (Monitoring saja)</option>
               <option value="sdm">SDM (Monitoring Full - Tanpa Kelola Admin)</option>
+              <option value="manager">Manager (Data Departemen Sendiri)</option>
               <option value="superadmin">Super Admin (Akses Penuh)</option>
             </select>
           </div>
@@ -259,15 +263,21 @@ export default function Admins() {
         <p style={{ color: "var(--color-outline)", fontSize: "14px", marginBottom: "20px", lineHeight: 1.5 }}>
           {confirmModal.message}
         </p>
+        {confirmModal.type === 'reset' && (
+          <label style={{ display: 'block', marginBottom: '20px', fontSize: '12px', fontWeight: 600, color: 'var(--color-outline)' }}>
+            Password baru (minimal 12 karakter)
+            <input type="password" required minLength="12" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} style={{ width: '100%', marginTop: '7px', padding: '10px 12px', border: '1px solid var(--color-outline-variant)', borderRadius: '8px', background: 'var(--color-surface)', color: 'var(--color-on-background)' }} />
+          </label>
+        )}
         <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
           <button onClick={() => setConfirmModal({ ...confirmModal, open: false })} style={{ padding: "10px 18px", border: "1px solid var(--color-outline-variant)", borderRadius: "8px", background: "var(--color-surface-container-lowest)", fontSize: "14px", fontWeight: 600, cursor: "pointer", color: "var(--color-on-background)" }}>
             Batal
           </button>
-          <button onClick={() => {
+          <button disabled={confirmModal.type === 'reset' && resetPassword.length < 12} onClick={() => {
             if (confirmModal.type === 'delete') handleDelete(confirmModal.data);
             if (confirmModal.type === 'reset') handleResetPassword(confirmModal.data);
             setConfirmModal({ ...confirmModal, open: false });
-          }} style={{ padding: "10px 18px", background: confirmModal.type === 'delete' ? "var(--color-error)" : "var(--color-secondary)", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: 600, color: "var(--color-on-primary)", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
+          }} style={{ padding: "10px 18px", background: confirmModal.type === 'delete' ? "var(--color-error)" : "var(--color-secondary)", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: 600, color: "var(--color-on-primary)", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", opacity: confirmModal.type === 'reset' && resetPassword.length < 12 ? 0.55 : 1 }}>
             <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>
               {confirmModal.type === 'delete' ? 'delete' : 'lock_reset'}
             </span>
