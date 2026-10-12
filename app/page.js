@@ -223,7 +223,7 @@ export default function Home() {
               <select value={selectedDeviceId} onChange={(event) => { sessionStorage.setItem("selectedDeviceId", event.target.value); setSelectedDeviceId(event.target.value); setPage(1); }}
                 style={{ minWidth: "250px", padding: "9px 12px", border: "1px solid var(--color-outline-variant)", borderRadius: "8px", background: "var(--color-surface)", color: "var(--color-on-background)", fontWeight: 600 }}>
                 <option value="">Pilih mesin presensi</option>
-                {devices.map((device) => <option key={device.id} value={device.id}>{device.code} — {device.name}{device.segment_name ? ` (${device.segment_name})` : ''}</option>)}
+                {devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.segment_name ? ` (${device.segment_name})` : ''}</option>)}
               </select>
             </div>
           </div>
