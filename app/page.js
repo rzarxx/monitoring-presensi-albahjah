@@ -502,7 +502,11 @@ export default function Home() {
                   const durMs    = checkIn && checkOut ? checkOut - checkIn : 0;
                   const durHr    = Math.floor(durMs / 3600000);
                   const durMin   = Math.floor((durMs % 3600000) / 60000);
-                  const dateStr  = new Date(item.date).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric" });
+                  const attendanceDate = item.date || item.attendance_date;
+                  const parsedDate = attendanceDate ? new Date(attendanceDate) : null;
+                  const dateStr = parsedDate && !Number.isNaN(parsedDate.getTime())
+                    ? parsedDate.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric" })
+                    : "—";
 
                   return (
                     <tr key={idx} style={{ borderBottom: "1px solid #eef4ff", transition: "background 0.1s" }}

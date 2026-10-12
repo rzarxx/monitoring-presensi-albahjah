@@ -12,14 +12,19 @@ export default function AttendanceChart({ data }) {
   }
 
   // Format data for chart
-  const chartData = data.map(item => ({
-    ...item,
-    Hadir: item.hadir,
-    Izin: item.izin,
-    Sakit: item.sakit,
-    Cuti: item.cuti,
-    dateLabel: new Date(item.date).toLocaleDateString("id-ID", { day: "2-digit", month: "short" })
-  })).reverse(); // reverse so oldest is left, newest right
+  const chartData = data.map(item => {
+    const date = item.date ? new Date(item.date) : null;
+    return {
+      ...item,
+      Hadir: item.hadir,
+      Izin: item.izin,
+      Sakit: item.sakit,
+      Cuti: item.cuti,
+      dateLabel: date && !Number.isNaN(date.getTime())
+        ? date.toLocaleDateString("id-ID", { day: "2-digit", month: "short" })
+        : "—",
+    };
+  }).reverse(); // reverse so oldest is left, newest right
 
   return (
     <div style={{ width: "100%", height: "300px", marginTop: "16px" }}>

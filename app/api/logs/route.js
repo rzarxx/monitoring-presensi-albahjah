@@ -4,7 +4,7 @@ import { getUserSession } from '@/lib/auth';
 import { requireDevice } from '@/lib/devices';
 
 const sortableColumns = {
-  date: 'attendance_date',
+  date: 'date',
   name: 'name',
   department: 'department',
   check_in: 'check_in',
@@ -50,7 +50,7 @@ export async function GET(request) {
     `, rawParams);
 
     const report = await query(`
-      SELECT DATE(a.timestamp) AS attendance_date, a.uid AS device_uid,
+      SELECT DATE(a.timestamp) AS date, a.uid AS device_uid,
              COALESCE(e.name, de.display_name, CONCAT('UID_', a.uid)) AS name,
              COALESCE(e.department, '') AS department,
              MIN(a.timestamp) AS check_in, MAX(a.timestamp) AS check_out,
