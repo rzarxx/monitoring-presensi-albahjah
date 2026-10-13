@@ -89,7 +89,7 @@ export default function Employees() {
         body: JSON.stringify(formData),
       });
       if (!res.ok) throw new Error(await res.text());
-      showNotif("Karyawan berhasil ditambahkan!", "success");
+      showNotif("Pejuang berhasil ditambahkan!", "success");
       setAddModal(false);
       setFormData({ uid: "", name: "", department: "" });
       fetchEmployees();
@@ -110,7 +110,7 @@ export default function Employees() {
         body: JSON.stringify(editFormData),
       });
       if (!res.ok) throw new Error(await res.text());
-      showNotif("Data karyawan berhasil diperbarui!", "success");
+      showNotif("Data Pejuang berhasil diperbarui!", "success");
       setEditModal({ open: false, employee: null });
       fetchEmployees();
     } catch (err) {
@@ -127,9 +127,9 @@ export default function Employees() {
       if (res.ok) {
         setDeleteModal({ open: false, employee: null });
         fetchEmployees();
-        showNotif("Karyawan berhasil dihapus.");
+        showNotif("Pejuang berhasil dihapus.");
       } else {
-        showNotif("Gagal menghapus karyawan.", "error");
+        showNotif("Gagal menghapus Pejuang.", "error");
       }
     } catch (e) {
       showNotif("Terjadi kesalahan.", "error");
@@ -220,10 +220,10 @@ export default function Employees() {
               margin: "0 0 4px", fontSize: "36px", fontWeight: 700,
               color: "var(--color-on-background)", letterSpacing: "-0.02em",
             }}>
-              Manajemen Karyawan
+              Manajemen Pejuang
             </h1>
             <p style={{ margin: 0, fontSize: "14px", color: "var(--color-outline)" }}>
-              Kelola basis data karyawan dan pemetaan identitas (UID) perangkat absensi.
+              Kelola basis data Pejuang dan pemetaan identitas (UID) perangkat absensi.
             </p>
           </div>
 
@@ -243,7 +243,7 @@ export default function Employees() {
         {/* ── Stats Row ─────────────────────────────────────────────────── */}
         <div className="stats-grid">
           {[
-            { label: "Total Karyawan", value: employees.length, icon: "group", color: "var(--color-primary)", bg: "rgba(5,150,105,0.08)" },
+            { label: "Total Pejuang", value: employees.length, icon: "group", color: "var(--color-primary)", bg: "rgba(5,150,105,0.08)" },
             { label: "Telah Memindai", value: metrics.authorized || 0, icon: "fingerprint", color: "#1a7a4a", bg: "rgba(26,122,74,0.08)" },
             { label: "Tidak Dikenali", value: metrics.unauthorized || 0, icon: "person_off", color: "var(--color-error)", bg: "rgba(239,68,68,0.08)" },
           ].map((stat, i) => (
@@ -275,7 +275,7 @@ export default function Employees() {
             padding: "18px 24px", borderBottom: "1px solid #e4efff", flexWrap: "wrap", gap: "12px",
           }}>
             <div style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-on-background)" }}>
-              Daftar Karyawan
+              Daftar Pejuang
               <span style={{
                 marginLeft: "8px", fontSize: "12px", fontWeight: 600,
                 background: "var(--color-surface-container-high)", color: "var(--color-primary)",
@@ -310,7 +310,7 @@ export default function Employees() {
                 <tr style={{ background: "var(--color-background)", borderBottom: "1px solid #e4efff" }}>
                   {[
                     { key: "uid", label: "UID", width: "1%" },
-                    { key: "name", label: "Nama Karyawan", width: "auto" },
+                    { key: "name", label: "Nama Pejuang", width: "auto" },
                     { key: "department", label: "Departemen", width: "auto" },
                     { key: null, label: "Aksi", width: "1%", hide: !isSuperAdmin },
                   ].filter(h => !h.hide).map(h => (
@@ -346,7 +346,7 @@ export default function Employees() {
                   <tr>
                     <td colSpan="4" style={{ padding: "48px", textAlign: "center", color: "var(--color-outline)" }}>
                       <span className="material-symbols-outlined" style={{ display: "block", fontSize: "40px", opacity: 0.3, marginBottom: "8px" }}>group</span>
-                      {search ? "Tidak ada karyawan yang cocok" : "Belum ada karyawan terdaftar"}
+                      {search ? "Tidak ada Pejuang yang cocok" : "Belum ada Pejuang terdaftar"}
                     </td>
                   </tr>
                 ) : filtered.map((emp) => (
@@ -408,7 +408,7 @@ export default function Employees() {
                           }}
                           onMouseEnter={e => { e.currentTarget.style.background = "#e4efff"; }}
                           onMouseLeave={e => { e.currentTarget.style.background = "#f0f6ff"; }}
-                          title="Edit Data Karyawan"
+                          title="Edit Data Pejuang"
                         >
                           <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "var(--color-primary)" }}>edit</span>
                         </button>
@@ -436,7 +436,7 @@ export default function Employees() {
                         }}
                         onMouseEnter={e => { e.currentTarget.style.background = "var(--color-error-container)"; }}
                         onMouseLeave={e => { e.currentTarget.style.background = "#fff8f7"; }}
-                        title="Hapus karyawan"
+                        title="Hapus Pejuang"
                       >
                         <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "var(--color-error)" }}>delete</span>
                       </button>
@@ -452,11 +452,11 @@ export default function Employees() {
       </div>
 
       {/* ── Add Employee Modal ───────────────────────────────────────────── */}
-      <Modal isOpen={addModal} onClose={() => setAddModal(false)} title="Tambah Karyawan Baru" size="sm">
+      <Modal isOpen={addModal} onClose={() => setAddModal(false)} title="Tambah Pejuang Baru" size="sm">
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {[
             { key: "uid", label: "Device UID", type: "number", placeholder: "contoh: 5", required: true },
-            { key: "name", label: "Nama Lengkap", type: "text", placeholder: "Nama Karyawan", required: true },
+            { key: "name", label: "Nama Lengkap", type: "text", placeholder: "Nama Pejuang", required: true },
             { key: "department", label: "Departemen", type: "text", placeholder: "contoh: HRD", required: false },
           ].map(field => (
             <div key={field.key}>
@@ -501,7 +501,7 @@ export default function Employees() {
       </Modal>
 
       {/* ── Edit Employee Modal ───────────────────────────────────────────── */}
-      <Modal isOpen={editModal.open} onClose={() => setEditModal({ open: false, employee: null })} title="Edit Data Karyawan" size="sm">
+      <Modal isOpen={editModal.open} onClose={() => setEditModal({ open: false, employee: null })} title="Edit Data Pejuang" size="sm">
         <form onSubmit={handleEditSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {[
             { key: "uid", label: "Device UID", type: "number", disabled: true },
@@ -608,7 +608,7 @@ export default function Employees() {
       </Modal>
 
       {/* ── Delete Confirmation Modal ────────────────────────────────────── */}
-      <Modal isOpen={deleteModal.open} onClose={() => setDeleteModal({ open: false, employee: null })} title="Hapus Karyawan" size="sm">
+      <Modal isOpen={deleteModal.open} onClose={() => setDeleteModal({ open: false, employee: null })} title="Hapus Pejuang" size="sm">
         <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "16px", background: "#fff8f7", borderRadius: "12px", marginBottom: "20px" }}>
           <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "var(--color-primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", fontWeight: 700, color: "var(--color-surface)", flexShrink: 0 }}>
             {deleteModal.employee?.name?.charAt(0)}
@@ -619,7 +619,7 @@ export default function Employees() {
           </div>
         </div>
         <p style={{ color: "var(--color-outline)", fontSize: "13px", marginBottom: "20px" }}>
-          Data karyawan ini akan dihapus secara permanen dari sistem.
+          Data Pejuang ini akan dihapus secara permanen dari sistem.
         </p>
         <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
           <button onClick={() => setDeleteModal({ open: false, employee: null })} style={{

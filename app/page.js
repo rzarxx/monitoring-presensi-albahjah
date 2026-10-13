@@ -175,7 +175,7 @@ export default function Home() {
           open: true,
           success: res.ok,
           message: res.ok
-            ? `Sinkronisasi selesai!\n• ${json.synced ?? 0} log baru\n• ${json.users_synced ?? 0} karyawan disinkronkan`
+            ? `Sinkronisasi selesai!\n• ${json.synced ?? 0} log baru\n• ${json.users_synced ?? 0} Pejuang disinkronkan`
             : `Gagal: ${json.error}`,
         });
       }
@@ -226,7 +226,7 @@ export default function Home() {
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "16px", marginBottom: "24px" }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: "36px", fontWeight: 700, color: "var(--color-on-background)", letterSpacing: "-0.02em" }}>Ringkasan Dasbor</h1>
+            <h1 style={{ margin: 0, fontSize: "36px", fontWeight: 700, color: "var(--color-on-background)", letterSpacing: "-0.02em" }}>Ringkasan Dashboard</h1>
             <p style={{ margin: "4px 0 0", fontSize: "11px", color: "var(--color-outline)", fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", letterSpacing: "0.08em" }}>
               Waktu Sistem: {timeStr}
             </p>
@@ -402,7 +402,7 @@ export default function Home() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
               <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Statistik Harian (7 Hari Terakhir)</h2>
-              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-outline)" }}>Ringkasan kehadiran, cuti, izin, dan sakit karyawan.</p>
+              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-outline)" }}>Ringkasan kehadiran, cuti, izin, dan sakit Pejuang.</p>
             </div>
             <span className="material-symbols-outlined" style={{ fontSize: "24px", color: "var(--color-outline-variant)" }}>bar_chart</span>
           </div>

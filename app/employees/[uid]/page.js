@@ -69,7 +69,7 @@ export default function EmployeeProfile() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "32px", padding: "0 4px" }}>
           <div>
             <h1 style={{ margin: "0 0 8px", fontSize: "28px", fontWeight: 700, color: "var(--color-on-background)", letterSpacing: "-0.02em" }}>
-              Profil Karyawan
+              Profil Pejuang
             </h1>
             <p style={{ margin: 0, fontSize: "14px", color: "var(--color-outline)" }}>
               Detail riwayat dan statistik kehadiran.
@@ -89,7 +89,7 @@ export default function EmployeeProfile() {
         {isLoading ? (
            <p style={{ color: "var(--color-outline)", fontSize: "14px" }}>Memuat profil...</p>
         ) : !employee ? (
-           <p style={{ color: "var(--color-error)", fontSize: "14px" }}>Karyawan tidak ditemukan.</p>
+           <p style={{ color: "var(--color-error)", fontSize: "14px" }}>Pejuang tidak ditemukan.</p>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "24px", alignItems: "start" }}>
             

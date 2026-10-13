@@ -61,7 +61,7 @@ export default function LoginPage() {
           <div style={{ marginBottom: "16px", display: "flex", justifyContent: "center" }}>
             <Image
               src="/logo.png"
-              alt="PRESENSI YAYASAN"
+              alt="Presensi Yayasan Al Bahjah Pusat"
               width={80}
               height={80}
               style={{
@@ -74,10 +74,10 @@ export default function LoginPage() {
             />
           </div>
           <h1 style={{ margin: "0 0 6px", fontSize: "22px", fontWeight: 800, color: "var(--color-on-background)", letterSpacing: "-0.02em", textTransform: "uppercase" }}>
-            Presensi Yayasan
+            Presensi Yayasan Al Bahjah Pusat
           </h1>
           <p style={{ margin: 0, fontSize: "11px", fontWeight: 500, color: "var(--color-outline)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-            Sistem Monitoring Kehadiran
+            Sistem Monitoring Kehadiran Pejuang
           </p>
         </div>
 
@@ -90,7 +90,7 @@ export default function LoginPage() {
           boxShadow: "0 8px 40px rgba(0, 0, 0, 0.05)",
         }}>
           <h2 style={{ margin: "0 0 6px", fontSize: "20px", fontWeight: 700, color: "var(--color-on-background)" }}>
-            Masuk ke Dasbor
+            Masuk ke Dashboard
           </h2>
           <p style={{ margin: "0 0 24px", fontSize: "13px", color: "var(--color-outline)" }}>
             Masukkan kredensial Anda untuk mengakses sistem.

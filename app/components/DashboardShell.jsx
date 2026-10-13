@@ -32,8 +32,8 @@ export default function DashboardShell({ children, metrics }) {
 
   // Admin menu hanya tampil untuk superadmin
   const navItems = [
-    { href: "/", label: "Dasbor", icon: "dashboard" },
-    { href: "/employees", label: "Karyawan", icon: "groups" },
+    { href: "/", label: "Dashboard", icon: "dashboard" },
+    { href: "/employees", label: "Pejuang", icon: "groups" },
     ...(isSuperAdmin ? [{ href: "/devices", label: "Mesin", icon: "memory" }] : []),
     ...(isSuperAdmin ? [{ href: "/admins", label: "Admin", icon: "admin_panel_settings" }] : []),
   ];
@@ -97,10 +97,10 @@ export default function DashboardShell({ children, metrics }) {
             />
             <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
               <span style={{ fontSize: "14px", fontWeight: 800, color: "var(--color-primary)", letterSpacing: "-0.01em", textTransform: "uppercase" }}>
-                Presensi Yayasan
+                Presensi Yayasan Al Bahjah Pusat
               </span>
               <span style={{ fontSize: "9px", color: "var(--color-outline)", fontWeight: 500, letterSpacing: "0.04em" }}>
-                Sistem Monitoring Kehadiran
+                Sistem Monitoring Kehadiran Pejuang
               </span>
             </div>
           </Link>

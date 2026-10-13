@@ -16,7 +16,7 @@ const OG_IMAGE = `${APP_URL}/og-image.jpg`;
 
 export const metadata = {
   metadataBase: new URL(APP_URL),
-  title: "PRESENSI YAYASAN — Sistem Monitoring Kehadiran",
+  title: "PRESENSI YAYASAN AL BAHJAH PUSAT — Sistem Monitoring Kehadiran",
   description: "Platform manajemen dan monitoring presensi karyawan berbasis sidik jari secara real-time. Kelola kehadiran dengan mudah, akurat, dan aman.",
 
   // Favicon
@@ -30,8 +30,8 @@ export const metadata = {
   openGraph: {
     type: "website",
     url: APP_URL,
-    siteName: "PRESENSI YAYASAN",
-    title: "PRESENSI YAYASAN — Sistem Monitoring Kehadiran",
+    siteName: "PRESENSI YAYASAN AL BAHJAH PUSAT",
+    title: "PRESENSI YAYASAN AL BAHJAH PUSAT — Sistem Monitoring Kehadiran",
     description: "Platform manajemen dan monitoring presensi karyawan berbasis sidik jari secara real-time.",
     images: [
       {
@@ -48,7 +48,7 @@ export const metadata = {
   // Twitter Card — Twitter / X
   twitter: {
     card: "summary_large_image",
-    title: "PRESENSI YAYASAN — Sistem Monitoring Kehadiran",
+    title: "PRESENSI YAYASAN AL BAHJAH PUSAT — Sistem Monitoring Kehadiran",
     description: "Platform manajemen dan monitoring presensi karyawan berbasis sidik jari secara real-time.",
     images: [OG_IMAGE],
   },
