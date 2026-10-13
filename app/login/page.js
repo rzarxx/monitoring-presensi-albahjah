@@ -186,7 +186,7 @@ export default function LoginPage() {
         </div>
 
         <p style={{ textAlign: "center", color: "#9ca3af", fontSize: "11px", marginTop: "24px", fontFamily: "'JetBrains Mono', monospace" }}>
-          Powered by <strong style={{ color: "#059669" }}>PUTI</strong> (Pusat Teknologi Informasi Al-Bahjah)
+          Powered by <strong style={{ color: "#059669" }}>PUTI</strong> (Pusat Teknologi Informasi Al-Bahjah) 2026
         </p>
       </div>
 

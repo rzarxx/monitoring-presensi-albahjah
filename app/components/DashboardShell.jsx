@@ -243,7 +243,7 @@ export default function DashboardShell({ children, metrics }) {
         <span>
           Powered by{" "}
           <strong style={{ color: "var(--color-primary)", fontWeight: 700 }}>PUTI</strong>
-          {" "}(Pusat Teknologi Informasi Al-Bahjah)
+          {" "}(Pusat Teknologi Informasi Al-Bahjah) 2026
         </span>
       </footer>
 
