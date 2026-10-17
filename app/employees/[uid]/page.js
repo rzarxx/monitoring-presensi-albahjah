@@ -3,32 +3,27 @@
 import { useState, useEffect, useCallback } from "react";
 import DashboardShell from "@/app/components/DashboardShell";
 import AttendanceChart from "@/app/components/AttendanceChart";
+import DeviceSelect, { useSelectedDevice } from "@/app/components/DeviceSelect";
 import { useParams } from "next/navigation";
 
 export default function EmployeeProfile() {
   const { uid } = useParams();
+  const { devices, deviceId, setDeviceId, loaded: devicesLoaded } = useSelectedDevice();
   const [employee, setEmployee] = useState(null);
   const [chartData, setChartData] = useState([]);
   const [logs, setLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
+    if (!devicesLoaded) return;
     setIsLoading(true);
     try {
-      let deviceId = sessionStorage.getItem("selectedDeviceId");
-      if (!deviceId) {
-        const devicesRes = await fetch("/api/devices");
-        const devicesJson = await devicesRes.json();
-        deviceId = devicesJson.data?.[0]?.id ? String(devicesJson.data[0].id) : "";
-        if (deviceId) sessionStorage.setItem("selectedDeviceId", deviceId);
-      }
-
       // 1. Get Employee Info
       const empRes = await fetch(`/api/employees`);
       if (empRes.ok) {
         const empJson = await empRes.json();
         const found = empJson.data.find(e => String(e.uid) === uid);
-        setEmployee(found || { uid, name: "Tidak Ditemukan", department: "-" });
+        setEmployee(found || { uid, name: "Tidak Ditemukan", department: "-", devices: [] });
       }
 
       // 2. Get 7-Day Stats for this user
@@ -54,7 +49,7 @@ export default function EmployeeProfile() {
     } finally {
       setIsLoading(false);
     }
-  }, [uid]);
+  }, [uid, deviceId, devicesLoaded]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -72,8 +67,11 @@ export default function EmployeeProfile() {
               Profil Pejuang
             </h1>
             <p style={{ margin: 0, fontSize: "14px", color: "var(--color-outline)" }}>
-              Detail riwayat dan statistik kehadiran.
+              Detail riwayat dan statistik kehadiran per mesin.
             </p>
+            <div style={{ marginTop: "12px" }}>
+              <DeviceSelect devices={devices} value={deviceId} onChange={setDeviceId} />
+            </div>
           </div>
           <button onClick={() => window.history.back()} style={{
             display: "flex", alignItems: "center", gap: "8px", padding: "10px 18px",
@@ -108,6 +106,10 @@ export default function EmployeeProfile() {
               <div style={{ width: "100%", background: "var(--color-surface-container-low)", borderRadius: "12px", padding: "16px", textAlign: "left" }}>
                 <p style={{ margin: "0 0 4px", fontSize: "11px", color: "var(--color-outline)", textTransform: "uppercase", fontWeight: 600 }}>Departemen</p>
                 <p style={{ margin: "0", fontSize: "14px", fontWeight: 500, color: "var(--color-on-background)" }}>{employee.department || "-"}</p>
+                <p style={{ margin: "12px 0 4px", fontSize: "11px", color: "var(--color-outline)", textTransform: "uppercase", fontWeight: 600 }}>Tercatat di Mesin</p>
+                <p style={{ margin: "0", fontSize: "14px", fontWeight: 500, color: "var(--color-on-background)" }}>
+                  {employee.devices?.length ? employee.devices.map((item) => item.name).join(", ") : "-"}
+                </p>
               </div>
             </div>
 
