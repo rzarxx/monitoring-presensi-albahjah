@@ -4,9 +4,46 @@ import { getZkData, runDeviceJob } from '@/lib/zkteco';
 import { getUserSession } from '@/lib/auth';
 import { findDevice, parseDeviceId } from '@/lib/devices';
 
+const pad = (value) => String(value).padStart(2, '0');
+const formatLocal = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+
+function latestRecordTime(logs) {
+  let latest = null;
+  for (const log of logs) {
+    const time = new Date(log.recordTime);
+    if (!Number.isNaN(time.getTime()) && (!latest || time > latest)) latest = time;
+  }
+  return latest;
+}
+
+// Membandingkan apa yang dilaporkan mesin, yang terbaca, dan yang tersimpan,
+// supaya pembacaan yang tidak lengkap terlihat di hasil sinkronisasi.
+async function buildDiagnostics(device, { logs, machine, partial }) {
+  const [row] = await query(`SELECT COUNT(*) AS total, MAX(timestamp) AS latest FROM attendance_logs WHERE device_id = ?`, [device.id]);
+  const latestMachine = latestRecordTime(logs);
+  const latestDatabase = row?.latest ? new Date(row.latest) : null;
+  const warnings = [];
+  if (partial) warnings.push(`Pembacaan log terhenti sebelum selesai: ${partial}`);
+  if (machine && logs.length < machine.logCount) {
+    warnings.push(`Mesin melaporkan ${machine.logCount} log, tetapi hanya ${logs.length} yang terbaca. Coba sinkronkan ulang.`);
+  }
+  if (latestMachine && (!latestDatabase || latestMachine > latestDatabase)) {
+    warnings.push('Scan terakhir di mesin belum tersimpan di database. Coba "Sinkronkan Semua Data".');
+  }
+  return {
+    machine_log_count: machine?.logCount ?? null,
+    read_log_count: logs.length,
+    database_log_count: Number(row?.total || 0),
+    latest_machine_log: latestMachine ? formatLocal(latestMachine) : null,
+    latest_database_log: latestDatabase ? formatLocal(latestDatabase) : null,
+    warnings,
+  };
+}
+
 async function syncDevice(device, full) {
-  const { users, logs } = await getZkData(device);
-  if (!logs?.length) return { message: 'Tidak ada data absensi dari mesin.', synced: 0, users_synced: 0 };
+  const pulled = await getZkData(device);
+  const { users } = pulled;
+  const logs = pulled.logs || [];
 
   for (const machineUser of users || []) {
     const uid = Number.parseInt(machineUser.userId, 10);
@@ -30,10 +67,7 @@ async function syncDevice(device, full) {
   const values = logsToSave.map((log) => {
     const uid = Number.parseInt(log.deviceUserId, 10);
     if (!Number.isInteger(uid)) return null;
-    const date = new Date(log.recordTime);
-    const pad = (value) => String(value).padStart(2, '0');
-    const timestamp = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-    return [device.id, uid, timestamp, log.state || 0];
+    return [device.id, uid, formatLocal(new Date(log.recordTime)), log.state || 0];
   }).filter(Boolean);
 
   let totalInserted = 0;
@@ -42,7 +76,12 @@ async function syncDevice(device, full) {
     totalInserted += result.affectedRows || 0;
   }
 
-  return { message: 'Sinkronisasi berhasil.', synced: totalInserted, users_synced: users?.length || 0 };
+  return {
+    message: logs.length ? 'Sinkronisasi berhasil.' : 'Tidak ada data absensi dari mesin.',
+    synced: totalInserted,
+    users_synced: users?.length || 0,
+    diagnostics: await buildDiagnostics(device, pulled),
+  };
 }
 
 export async function POST(request) {
