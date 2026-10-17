@@ -1,28 +1,44 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import DashboardShell from "@/app/components/DashboardShell";
+import DeviceSelect, { deviceLabel, useSelectedDevice } from "@/app/components/DeviceSelect";
 import Modal from "@/app/components/Modal";
 import Link from "next/link";
 
-async function resolveSelectedDeviceId() {
-  let deviceId = sessionStorage.getItem("selectedDeviceId");
-  if (deviceId) return deviceId;
-  const devicesRes = await fetch("/api/devices");
-  const devicesJson = await devicesRes.json();
-  deviceId = devicesJson.data?.[0]?.id ? String(devicesJson.data[0].id) : "";
-  if (deviceId) sessionStorage.setItem("selectedDeviceId", deviceId);
-  return deviceId;
+const todayLocal = () => new Date().toLocaleDateString("en-CA");
+const emptyLeave = { open: false, employee: null, deviceId: "", type: 'Izin', date: todayLocal(), reason: '' };
+
+const chipStyle = {
+  fontSize: "12px", padding: "3px 10px", borderRadius: "6px",
+  background: "var(--color-surface-container-high)", color: "var(--color-primary)", fontWeight: 500,
+};
+
+function DeviceChips({ devices }) {
+  if (!devices?.length) return <span style={{ color: "var(--color-outline-variant)", fontSize: "13px" }}>—</span>;
+  return (
+    <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+      {devices.map((device) => <span key={device.id} style={chipStyle}>{device.name}</span>)}
+    </div>
+  );
+}
+
+async function readError(res, fallback) {
+  const json = await res.json().catch(() => ({}));
+  return json.error || fallback;
 }
 
 export default function Employees() {
+  const { devices, deviceId, setDeviceId, device, isAll, loaded: devicesLoaded } = useSelectedDevice({ allowAll: true });
   const [employees, setEmployees] = useState([]);
+  const [unregistered, setUnregistered] = useState([]);
+  const [isLoadingList, setIsLoadingList] = useState(true);
   const [metrics, setMetrics] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({ uid: "", name: "", department: "" });
   const [editFormData, setEditFormData] = useState({ uid: "", name: "", department: "" });
   const [deleteModal, setDeleteModal] = useState({ open: false, employee: null });
-  const [leaveModal, setLeaveModal] = useState({ open: false, employee: null, type: 'Izin', date: new Date().toISOString().split('T')[0], reason: '' });
+  const [leaveModal, setLeaveModal] = useState(emptyLeave);
   const [addModal, setAddModal] = useState(false);
   const [editModal, setEditModal] = useState({ open: false, employee: null });
   const [notification, setNotification] = useState(null);
@@ -37,24 +53,31 @@ export default function Employees() {
   const [currentUser, setCurrentUser] = useState(null);
   const [userLoaded, setUserLoaded] = useState(false);
 
-  const fetchEmployees = async () => {
+  const fetchEmployees = useCallback(async () => {
+    if (!devicesLoaded) return;
     try {
-      const res = await fetch("/api/employees");
+      const query = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";
+      const res = await fetch(`/api/employees${query}`);
       const json = await res.json();
       if (json.data) setEmployees(json.data);
-    } catch (e) { console.error(e); }
-  };
+      setUnregistered(json.unregistered || []);
+    } catch (e) { console.error(e); } finally {
+      setIsLoadingList(false);
+    }
+  }, [deviceId, devicesLoaded]);
 
-  const fetchMetrics = async () => {
+  // Metrik scan hari ini hanya bermakna untuk satu mesin.
+  const fetchMetrics = useCallback(async () => {
+    if (!deviceId || isAll) {
+      setMetrics({});
+      return;
+    }
     try {
-      const deviceId = await resolveSelectedDeviceId();
-      if (!deviceId) return;
-
       const res = await fetch(`/api/logs?device_id=${encodeURIComponent(deviceId)}`);
       const json = await res.json();
       if (json.metrics) setMetrics(json.metrics);
     } catch (e) { console.error(e); }
-  };
+  }, [deviceId, isAll]);
 
   const fetchCurrentUser = async () => {
     try {
@@ -70,14 +93,29 @@ export default function Employees() {
   const isSuperAdmin = userLoaded && (currentUser?.role === 'superadmin' || currentUser?.role === 'sdm');
 
   useEffect(() => {
-    // Data dimuat setelah komponen tersedia; tiap fungsi memperbarui state dari respons asynchronous.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchCurrentUser();
+  }, []);
+
+  useEffect(() => {
+    // Data dimuat ulang setiap kali mesin yang dipilih berubah.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchEmployees();
     fetchMetrics();
-    fetchCurrentUser();
     const iv = setInterval(fetchMetrics, 30000);
     return () => clearInterval(iv);
-  }, []);
+  }, [fetchEmployees, fetchMetrics]);
+
+  const openAddModal = (prefill = {}) => {
+    setFormData({ uid: "", name: "", department: "", ...prefill });
+    setAddModal(true);
+  };
+
+  const openLeaveModal = (emp) => {
+    // Bawaan: mesin yang sedang dipilih, lalu mesin tempat Pejuang terdaftar.
+    const defaultDevice = !isAll && deviceId ? deviceId : String(emp.devices?.[0]?.id || devices[0]?.id || "");
+    setLeaveModal({ ...emptyLeave, open: true, employee: emp, deviceId: defaultDevice });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -88,7 +126,7 @@ export default function Employees() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await readError(res, "Gagal menyimpan data"));
       showNotif("Pejuang berhasil ditambahkan!", "success");
       setAddModal(false);
       setFormData({ uid: "", name: "", department: "" });
@@ -109,7 +147,7 @@ export default function Employees() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editFormData),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await readError(res, "Gagal memperbarui data"));
       showNotif("Data Pejuang berhasil diperbarui!", "success");
       setEditModal({ open: false, employee: null });
       fetchEmployees();
@@ -140,9 +178,11 @@ export default function Employees() {
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      const deviceId = await resolveSelectedDeviceId();
-      if (!deviceId) throw new Error("Pilih mesin presensi terlebih dahulu.");
-      const res = await fetch(`/api/leaves?device_id=${encodeURIComponent(deviceId)}`, {
+      if (!leaveModal.deviceId) {
+        showNotif("Pilih mesin presensi terlebih dahulu.", "error");
+        return;
+      }
+      const res = await fetch(`/api/leaves?device_id=${encodeURIComponent(leaveModal.deviceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -153,7 +193,7 @@ export default function Employees() {
         }),
       });
       if (res.ok) {
-        setLeaveModal({ open: false, employee: null, type: 'Izin', date: new Date().toISOString().split('T')[0], reason: '' });
+        setLeaveModal(emptyLeave);
         showNotif("Data Izin/Cuti berhasil disimpan!");
       } else {
         const json = await res.json();
@@ -225,10 +265,13 @@ export default function Employees() {
             <p style={{ margin: 0, fontSize: "14px", color: "var(--color-outline)" }}>
               Kelola basis data Pejuang dan pemetaan identitas (UID) perangkat absensi.
             </p>
+            <div style={{ marginTop: "12px" }}>
+              <DeviceSelect devices={devices} value={deviceId} onChange={setDeviceId} allowAll />
+            </div>
           </div>
 
           {isSuperAdmin && (
-          <button onClick={() => setAddModal(true)} style={{
+          <button onClick={() => openAddModal()} style={{
             background: "var(--color-primary)", color: "#fff", border: "none",
             padding: "10px 18px", borderRadius: "12px", display: "flex", alignItems: "center", gap: "8px",
             fontSize: "14px", fontWeight: "600", transition: "all 0.2s ease",
@@ -243,9 +286,9 @@ export default function Employees() {
         {/* ── Stats Row ─────────────────────────────────────────────────── */}
         <div className="stats-grid">
           {[
-            { label: "Total Pejuang", value: employees.length, icon: "group", color: "var(--color-primary)", bg: "rgba(5,150,105,0.08)" },
-            { label: "Telah Memindai", value: metrics.authorized || 0, icon: "fingerprint", color: "#1a7a4a", bg: "rgba(26,122,74,0.08)" },
-            { label: "Tidak Dikenali", value: metrics.unauthorized || 0, icon: "person_off", color: "var(--color-error)", bg: "rgba(239,68,68,0.08)" },
+            { label: "Total Pejuang", value: employees.length, icon: "group", color: "var(--color-primary)", bg: "rgba(5,150,105,0.08)", note: isAll ? "Semua mesin" : device?.name },
+            { label: "Telah Memindai", value: isAll ? "—" : metrics.authorized || 0, icon: "fingerprint", color: "#1a7a4a", bg: "rgba(26,122,74,0.08)", note: isAll ? "Pilih satu mesin" : `Hari ini · ${device?.name || "-"}` },
+            { label: "Tidak Dikenali", value: isAll ? "—" : metrics.unauthorized || 0, icon: "person_off", color: "var(--color-error)", bg: "rgba(239,68,68,0.08)", note: isAll ? "Pilih satu mesin" : `Hari ini · ${device?.name || "-"}` },
           ].map((stat, i) => (
             <div key={i} style={{
               background: "var(--color-surface)", border: "1px solid #e4efff",
@@ -261,6 +304,7 @@ export default function Employees() {
               <div>
                 <div style={{ fontSize: "11px", color: "var(--color-outline)", fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", letterSpacing: "0.06em" }}>{stat.label}</div>
                 <div style={{ fontSize: "24px", fontWeight: 700, color: stat.color, lineHeight: 1.3 }}>{stat.value}</div>
+                {stat.note && <div style={{ fontSize: "12px", color: "var(--color-outline)" }}>{stat.note}</div>}
               </div>
             </div>
           ))}
@@ -312,6 +356,7 @@ export default function Employees() {
                     { key: "uid", label: "UID", width: "1%" },
                     { key: "name", label: "Nama Pejuang", width: "auto" },
                     { key: "department", label: "Departemen", width: "auto" },
+                    { key: null, label: "Mesin", width: "auto" },
                     { key: null, label: "Aksi", width: "1%", hide: !isSuperAdmin },
                   ].filter(h => !h.hide).map(h => (
                     <th key={h.label}
@@ -344,9 +389,12 @@ export default function Employees() {
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan="4" style={{ padding: "48px", textAlign: "center", color: "var(--color-outline)" }}>
+                    <td colSpan={isSuperAdmin ? 5 : 4} style={{ padding: "48px", textAlign: "center", color: "var(--color-outline)" }}>
                       <span className="material-symbols-outlined" style={{ display: "block", fontSize: "40px", opacity: 0.3, marginBottom: "8px" }}>group</span>
-                      {search ? "Tidak ada Pejuang yang cocok" : "Belum ada Pejuang terdaftar"}
+                      {isLoadingList ? "Memuat data Pejuang..."
+                        : search ? "Tidak ada Pejuang yang cocok"
+                        : !isAll && device ? `Belum ada Pejuang yang tercatat di mesin ${device.name}`
+                        : "Belum ada Pejuang terdaftar"}
                     </td>
                   </tr>
                 ) : filtered.map((emp) => (
@@ -392,6 +440,9 @@ export default function Employees() {
                         <span style={{ color: "var(--color-outline-variant)", fontSize: "13px" }}>—</span>
                       )}
                     </td>
+                    <td style={{ padding: "14px 20px" }}>
+                      <DeviceChips devices={emp.devices} />
+                    </td>
                     {isSuperAdmin && (
                     <td style={{ padding: "14px 20px", width: "1%", whiteSpace: "nowrap" }}>
                       <div style={{ display: "flex", gap: "6px" }}>
@@ -413,7 +464,7 @@ export default function Employees() {
                           <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "var(--color-primary)" }}>edit</span>
                         </button>
                         <button
-                          onClick={() => setLeaveModal({ open: true, employee: emp, type: 'Izin', date: new Date().toISOString().split('T')[0], reason: '' })}
+                          onClick={() => openLeaveModal(emp)}
                           style={{
                             width: "32px", height: "32px", borderRadius: "8px",
                             border: "1px solid #eab308", background: "#fefce8",
@@ -449,6 +500,54 @@ export default function Employees() {
             </table>
           </div>
         </div>
+
+        {/* ── User mesin yang belum terdaftar sebagai Pejuang ────────────── */}
+        {unregistered.length > 0 && (
+          <div style={{ background: "var(--color-surface)", border: "1px solid #e4efff", borderRadius: "16px", overflow: "hidden", marginTop: "24px" }}>
+            <div style={{ padding: "18px 24px", borderBottom: "1px solid #e4efff" }}>
+              <div style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-on-background)" }}>
+                User Mesin Belum Terdaftar
+                <span style={{ marginLeft: "8px", fontSize: "12px", fontWeight: 600, background: "rgba(239,68,68,0.08)", color: "var(--color-error)", padding: "2px 10px", borderRadius: "20px" }}>{unregistered.length}</span>
+              </div>
+              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-outline)" }}>
+                UID ini tercatat di mesin{!isAll && device ? ` ${device.name}` : ""}, tetapi belum ada di data Pejuang sehingga scan-nya terhitung &quot;Tidak Dikenali&quot;.
+              </p>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+                <thead>
+                  <tr style={{ background: "var(--color-background)", borderBottom: "1px solid #e4efff" }}>
+                    {["UID", "Nama di Mesin", "Mesin", ...(isSuperAdmin ? ["Aksi"] : [])].map((label) => (
+                      <th key={label} style={{ padding: "12px 20px", textAlign: "left", fontSize: "12px", fontFamily: "'JetBrains Mono', monospace", color: "var(--color-outline)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>{label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {unregistered.map((item) => (
+                    <tr key={item.uid} style={{ borderBottom: "1px solid #f0f4ff" }}>
+                      <td style={{ padding: "12px 20px", width: "1%" }}>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", background: "var(--color-surface-container-high)", color: "var(--color-primary)", padding: "3px 10px", borderRadius: "6px", fontWeight: 600 }}>{item.uid}</span>
+                      </td>
+                      <td style={{ padding: "12px 20px", fontSize: "14px", color: item.name ? "var(--color-on-background)" : "var(--color-outline)" }}>
+                        {item.name || "(tanpa nama di mesin)"}
+                      </td>
+                      <td style={{ padding: "12px 20px" }}><DeviceChips devices={item.devices} /></td>
+                      {isSuperAdmin && (
+                        <td style={{ padding: "12px 20px", width: "1%" }}>
+                          <button onClick={() => openAddModal({ uid: String(item.uid), name: item.name })}
+                            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "7px 12px", border: "1px solid var(--color-primary)", borderRadius: "8px", background: "transparent", color: "var(--color-primary)", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>
+                            <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>person_add</span>
+                            Tambahkan
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Add Employee Modal ───────────────────────────────────────────── */}
@@ -564,6 +663,18 @@ export default function Employees() {
               </div>
             </div>
 
+            <div>
+              <label style={{ display: "block", marginBottom: "6px", fontSize: "11px", fontWeight: 600, color: "var(--color-outline)", textTransform: "uppercase" }}>Mesin Presensi</label>
+              <select required value={leaveModal.deviceId} onChange={e => setLeaveModal({ ...leaveModal, deviceId: e.target.value })}
+                style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #c3c6d6", borderRadius: "8px", fontSize: "14px", color: "var(--color-on-background)", background: "var(--color-background)", outline: "none", boxSizing: "border-box" }}>
+                <option value="">Pilih mesin presensi</option>
+                {devices.map((item) => <option key={item.id} value={item.id}>{deviceLabel(item)}</option>)}
+              </select>
+              <small style={{ display: "block", marginTop: "5px", color: "var(--color-outline)", fontSize: "11px" }}>
+                Izin/cuti tampil di laporan mesin yang dipilih di sini.
+              </small>
+            </div>
+
             <div className="form-grid">
               <div>
                 <label style={{ display: "block", marginBottom: "6px", fontSize: "11px", fontWeight: 600, color: "var(--color-outline)", textTransform: "uppercase" }}>Tanggal</label>
@@ -619,7 +730,7 @@ export default function Employees() {
           </div>
         </div>
         <p style={{ color: "var(--color-outline)", fontSize: "13px", marginBottom: "20px" }}>
-          Data Pejuang ini akan dihapus secara permanen dari sistem.
+          Data Pejuang ini akan dihapus secara permanen dari sistem. Riwayat scan di mesin tetap tersimpan.
         </p>
         <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
           <button onClick={() => setDeleteModal({ open: false, employee: null })} style={{

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import DashboardShell from "@/app/components/DashboardShell";
 import Modal from "@/app/components/Modal";
 import AttendanceChart from "@/app/components/AttendanceChart";
+import DeviceSelect, { useSelectedDevice } from "@/app/components/DeviceSelect";
 
 export default function Home() {
   const [timeStr, setTimeStr] = useState("00:00:00 WIB");
@@ -22,8 +23,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [machineStatus, setMachineStatus] = useState({ online: true, ip: "Memeriksa..." });
   const [chartData, setChartData] = useState([]);
-  const [devices, setDevices] = useState([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const { devices, deviceId: selectedDeviceId, setDeviceId: setSelectedDeviceId } = useSelectedDevice();
   const [canSync, setCanSync] = useState(false);
 
   // Clock
@@ -56,21 +56,6 @@ export default function Home() {
       .then((response) => response.ok ? response.json() : null)
       .then((json) => setCanSync(['superadmin', 'sdm'].includes(json?.user?.role)))
       .catch(() => setCanSync(false));
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/devices")
-      .then((response) => response.json())
-      .then((json) => {
-        const availableDevices = json.data || [];
-        setDevices(availableDevices);
-        if (availableDevices.length) {
-          const savedDeviceId = sessionStorage.getItem("selectedDeviceId");
-          const selectedDevice = availableDevices.find((device) => String(device.id) === savedDeviceId);
-          setSelectedDeviceId(String((selectedDevice || availableDevices[0]).id));
-        }
-      })
-      .catch(() => setDevices([]));
   }, []);
 
   // Fetch logs
@@ -242,13 +227,8 @@ export default function Home() {
             <p style={{ margin: "4px 0 0", fontSize: "11px", color: "var(--color-outline)", fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", letterSpacing: "0.08em" }}>
               Waktu Sistem: {timeStr}
             </p>
-            <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-primary)" }}>memory</span>
-              <select value={selectedDeviceId} onChange={(event) => { sessionStorage.setItem("selectedDeviceId", event.target.value); setSelectedDeviceId(event.target.value); setPage(1); }}
-                style={{ minWidth: "250px", padding: "9px 12px", border: "1px solid var(--color-outline-variant)", borderRadius: "8px", background: "var(--color-surface)", color: "var(--color-on-background)", fontWeight: 600 }}>
-                <option value="">Pilih mesin presensi</option>
-                {devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.segment_name ? ` (${device.segment_name})` : ''}</option>)}
-              </select>
+            <div style={{ marginTop: "12px" }}>
+              <DeviceSelect devices={devices} value={selectedDeviceId} onChange={(value) => { setSelectedDeviceId(value); setPage(1); }} />
             </div>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
