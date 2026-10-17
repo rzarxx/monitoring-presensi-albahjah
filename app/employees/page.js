@@ -14,11 +14,33 @@ const chipStyle = {
   background: "var(--color-surface-container-high)", color: "var(--color-primary)", fontWeight: 500,
 };
 
-function DeviceChips({ devices }) {
+const warningChipStyle = { ...chipStyle, background: "rgba(234,179,8,0.14)", color: "#a16207", display: "inline-flex", alignItems: "center", gap: "4px" };
+
+const normalizeName = (value) => String(value || "").toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
+
+// Nama di mesin sering disingkat atau tanpa spasi ("EvaPurnamasari"), jadi cukup
+// salah satu memuat yang lain untuk dianggap orang yang sama.
+function sameName(a, b) {
+  const left = normalizeName(a);
+  const right = normalizeName(b);
+  return !left || !right || left.includes(right) || right.includes(left);
+}
+
+// Data Pejuang dicocokkan lewat nomor UID saja, jadi UID yang sama di mesin lain
+// bisa milik orang berbeda. Mesin yang nama user-nya tidak cocok ditandai.
+function DeviceChips({ devices, personName }) {
   if (!devices?.length) return <span style={{ color: "var(--color-outline-variant)", fontSize: "13px" }}>—</span>;
   return (
     <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-      {devices.map((device) => <span key={device.id} style={chipStyle}>{device.name}</span>)}
+      {devices.map((device) => (personName && !sameName(personName, device.machine_name) ? (
+        <span key={device.id} style={warningChipStyle}
+          title={`Di mesin ${device.name}, UID ini bernama "${device.machine_name}". Kemungkinan orang berbeda yang kebetulan memakai nomor UID yang sama.`}>
+          <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>warning</span>
+          {device.name}: {device.machine_name}
+        </span>
+      ) : (
+        <span key={device.id} style={chipStyle}>{device.name}</span>
+      )))}
     </div>
   );
 }
@@ -41,6 +63,7 @@ export default function Employees() {
   const [leaveModal, setLeaveModal] = useState(emptyLeave);
   const [addModal, setAddModal] = useState(false);
   const [editModal, setEditModal] = useState({ open: false, employee: null });
+  const [bulkModal, setBulkModal] = useState({ open: false, selected: [], department: "" });
   const [notification, setNotification] = useState(null);
   const [search, setSearch] = useState("");
   const [sortConfig, setSortConfig] = useState({ col: null, dir: 'asc' });
@@ -109,6 +132,47 @@ export default function Employees() {
   const openAddModal = (prefill = {}) => {
     setFormData({ uid: "", name: "", department: "", ...prefill });
     setAddModal(true);
+  };
+
+  // Hanya user mesin yang punya nama yang bisa didaftarkan sekaligus.
+  const registerable = unregistered.filter((item) => item.name);
+
+  const openBulkModal = () => {
+    setBulkModal({ open: true, selected: registerable.map((item) => item.uid), department: "" });
+  };
+
+  const toggleBulkUid = (uid) => {
+    setBulkModal((state) => ({
+      ...state,
+      selected: state.selected.includes(uid) ? state.selected.filter((value) => value !== uid) : [...state.selected, uid],
+    }));
+  };
+
+  const handleBulkSubmit = async (e) => {
+    e.preventDefault();
+    const items = registerable.filter((item) => bulkModal.selected.includes(item.uid)).map(({ uid, name }) => ({ uid, name }));
+    if (items.length === 0) {
+      showNotif("Pilih minimal satu user mesin.", "error");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/employees/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items, department: bulkModal.department }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Gagal mendaftarkan Pejuang");
+      showNotif(json.message || "Pejuang berhasil didaftarkan!");
+      setBulkModal({ open: false, selected: [], department: "" });
+      fetchEmployees();
+      fetchMetrics();
+    } catch (err) {
+      showNotif(err.message || "Gagal mendaftarkan Pejuang", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const openLeaveModal = (emp) => {
@@ -441,7 +505,7 @@ export default function Employees() {
                       )}
                     </td>
                     <td style={{ padding: "14px 20px" }}>
-                      <DeviceChips devices={emp.devices} />
+                      <DeviceChips devices={emp.devices} personName={emp.name} />
                     </td>
                     {isSuperAdmin && (
                     <td style={{ padding: "14px 20px", width: "1%", whiteSpace: "nowrap" }}>
@@ -504,14 +568,23 @@ export default function Employees() {
         {/* ── User mesin yang belum terdaftar sebagai Pejuang ────────────── */}
         {unregistered.length > 0 && (
           <div style={{ background: "var(--color-surface)", border: "1px solid #e4efff", borderRadius: "16px", overflow: "hidden", marginTop: "24px" }}>
-            <div style={{ padding: "18px 24px", borderBottom: "1px solid #e4efff" }}>
-              <div style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-on-background)" }}>
-                User Mesin Belum Terdaftar
-                <span style={{ marginLeft: "8px", fontSize: "12px", fontWeight: 600, background: "rgba(239,68,68,0.08)", color: "var(--color-error)", padding: "2px 10px", borderRadius: "20px" }}>{unregistered.length}</span>
+            <div style={{ padding: "18px 24px", borderBottom: "1px solid #e4efff", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 320px" }}>
+                <div style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-on-background)" }}>
+                  User Mesin Belum Terdaftar
+                  <span style={{ marginLeft: "8px", fontSize: "12px", fontWeight: 600, background: "rgba(239,68,68,0.08)", color: "var(--color-error)", padding: "2px 10px", borderRadius: "20px" }}>{unregistered.length}</span>
+                </div>
+                <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-outline)" }}>
+                  UID ini tercatat di mesin{!isAll && device ? ` ${device.name}` : ""}, tetapi belum ada di data Pejuang sehingga scan-nya terhitung &quot;Tidak Dikenali&quot;.
+                </p>
               </div>
-              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-outline)" }}>
-                UID ini tercatat di mesin{!isAll && device ? ` ${device.name}` : ""}, tetapi belum ada di data Pejuang sehingga scan-nya terhitung &quot;Tidak Dikenali&quot;.
-              </p>
+              {isSuperAdmin && registerable.length > 0 && (
+                <button onClick={openBulkModal}
+                  style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 14px", background: "var(--color-primary)", border: "none", borderRadius: "8px", color: "var(--color-surface)", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>group_add</span>
+                  Daftarkan semua ({registerable.length})
+                </button>
+              )}
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
@@ -716,6 +789,54 @@ export default function Employees() {
             </div>
           </form>
         )}
+      </Modal>
+
+      {/* ── Bulk Register Modal ──────────────────────────────────────────── */}
+      <Modal isOpen={bulkModal.open} onClose={() => setBulkModal({ ...bulkModal, open: false })} title="Daftarkan User Mesin" size="sm">
+        <form onSubmit={handleBulkSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "var(--color-outline)", lineHeight: 1.6 }}>
+            User yang dicentang didaftarkan sebagai Pejuang memakai nama di mesin. Hapus centang akun yang bukan orang (misalnya &quot;Admin&quot;).
+            {unregistered.length > registerable.length && ` ${unregistered.length - registerable.length} UID tanpa nama di mesin tidak ikut; tambahkan satu per satu.`}
+          </p>
+          <div>
+            <label style={{ display: "block", marginBottom: "6px", fontSize: "11px", fontWeight: 600, color: "var(--color-outline)", textTransform: "uppercase" }}>Departemen (opsional)</label>
+            <input type="text" maxLength={255} placeholder="Kosongkan untuk diisi nanti" value={bulkModal.department}
+              onChange={e => setBulkModal({ ...bulkModal, department: e.target.value })}
+              style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #c3c6d6", borderRadius: "8px", fontSize: "14px", color: "var(--color-on-background)", background: "var(--color-background)", outline: "none", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ border: "1px solid var(--color-outline-variant)", borderRadius: "10px", overflow: "hidden" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", background: "var(--color-background)", borderBottom: "1px solid var(--color-outline-variant)", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>
+              <input type="checkbox" checked={bulkModal.selected.length === registerable.length}
+                onChange={e => setBulkModal({ ...bulkModal, selected: e.target.checked ? registerable.map((item) => item.uid) : [] })} />
+              Pilih semua ({bulkModal.selected.length}/{registerable.length})
+            </label>
+            <div style={{ maxHeight: "300px", overflowY: "auto" }}>
+              {registerable.map((item) => (
+                <label key={item.uid} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 14px", borderBottom: "1px solid #f0f4ff", fontSize: "13px", cursor: "pointer" }}>
+                  <input type="checkbox" checked={bulkModal.selected.includes(item.uid)} onChange={() => toggleBulkUid(item.uid)} />
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: "var(--color-primary)", minWidth: "36px" }}>{item.uid}</span>
+                  <span style={{ flex: 1, color: "var(--color-on-background)" }}>{item.name}</span>
+                  <span style={{ fontSize: "12px", color: "var(--color-outline)" }}>{item.devices.map((d) => d.name).join(", ")}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+            <button type="button" onClick={() => setBulkModal({ ...bulkModal, open: false })} style={{
+              padding: "10px 18px", border: "1px solid #c3c6d6", borderRadius: "8px",
+              background: "var(--color-surface)", fontSize: "13px", fontWeight: 600, cursor: "pointer", color: "var(--color-on-background)",
+            }}>Batal</button>
+            <button type="submit" disabled={isSubmitting || bulkModal.selected.length === 0} style={{
+              padding: "10px 18px", background: "var(--color-primary)", border: "none",
+              borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "var(--color-surface)",
+              cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
+              opacity: isSubmitting || bulkModal.selected.length === 0 ? 0.6 : 1,
+            }}>
+              <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>group_add</span>
+              {isSubmitting ? "Mendaftarkan..." : `Daftarkan ${bulkModal.selected.length} Pejuang`}
+            </button>
+          </div>
+        </form>
       </Modal>
 
       {/* ── Delete Confirmation Modal ────────────────────────────────────── */}
