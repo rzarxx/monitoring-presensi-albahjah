@@ -5,6 +5,7 @@ import DashboardShell from "@/app/components/DashboardShell";
 import DeviceSelect, { deviceLabel, useSelectedDevice } from "@/app/components/DeviceSelect";
 import Modal from "@/app/components/Modal";
 import Link from "next/link";
+import { sameName } from "@/lib/names";
 
 const todayLocal = () => new Date().toLocaleDateString("en-CA");
 const emptyLeave = { open: false, employee: null, deviceId: "", type: 'Izin', date: todayLocal(), reason: '' };
@@ -16,31 +17,42 @@ const chipStyle = {
 
 const warningChipStyle = { ...chipStyle, background: "rgba(234,179,8,0.14)", color: "#a16207", display: "inline-flex", alignItems: "center", gap: "4px" };
 
-const normalizeName = (value) => String(value || "").toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
+const smallButtonStyle = {
+  display: "flex", alignItems: "center", gap: "6px", padding: "7px 12px", border: "1px solid var(--color-primary)",
+  borderRadius: "8px", background: "transparent", color: "var(--color-primary)", fontSize: "13px", fontWeight: 600, cursor: "pointer",
+};
 
-// Nama di mesin sering disingkat atau tanpa spasi ("EvaPurnamasari"), jadi cukup
-// salah satu memuat yang lain untuk dianggap orang yang sama.
-function sameName(a, b) {
-  const left = normalizeName(a);
-  const right = normalizeName(b);
-  return !left || !right || left.includes(right) || right.includes(left);
-}
+const fieldStyle = {
+  width: "100%", padding: "10px 14px", border: "1.5px solid #c3c6d6", borderRadius: "8px", fontSize: "14px",
+  color: "var(--color-on-background)", background: "var(--color-background)", outline: "none", boxSizing: "border-box",
+};
 
-// Data Pejuang dicocokkan lewat nomor UID saja, jadi UID yang sama di mesin lain
-// bisa milik orang berbeda. Mesin yang nama user-nya tidak cocok ditandai.
-function DeviceChips({ devices, personName }) {
+const enrollmentKey = (item) => `${item.device_id}:${item.device_uid}`;
+
+// Setiap chip adalah satu user mesin yang dipetakan ke Pejuang ini. Chip kuning:
+// nama di mesin berbeda dengan nama Pejuang, periksa apakah pemetaannya benar.
+function DeviceChips({ devices, personName, onUnlink }) {
   if (!devices?.length) return <span style={{ color: "var(--color-outline-variant)", fontSize: "13px" }}>—</span>;
   return (
     <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-      {devices.map((device) => (personName && !sameName(personName, device.machine_name) ? (
-        <span key={device.id} style={warningChipStyle}
-          title={`Di mesin ${device.name}, UID ini bernama "${device.machine_name}". Kemungkinan orang berbeda yang kebetulan memakai nomor UID yang sama.`}>
-          <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>warning</span>
-          {device.name}: {device.machine_name}
-        </span>
-      ) : (
-        <span key={device.id} style={chipStyle}>{device.name}</span>
-      )))}
+      {devices.map((device) => {
+        const mismatch = device.machine_name && !sameName(personName, device.machine_name);
+        return (
+          <span key={`${device.id}:${device.device_uid}`} style={mismatch ? warningChipStyle : { ...chipStyle, display: "inline-flex", alignItems: "center", gap: "4px" }}
+            title={mismatch
+              ? `Di mesin ${device.name}, UID ${device.device_uid} bernama "${device.machine_name}". Lepas bila ini orang lain.`
+              : `UID ${device.device_uid} di mesin ${device.name}${device.machine_name ? ` (${device.machine_name})` : ""}`}>
+            {mismatch && <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>warning</span>}
+            {device.name} #{device.device_uid}{mismatch ? `: ${device.machine_name}` : ""}
+            {onUnlink && (
+              <button type="button" onClick={() => onUnlink(device)} aria-label={`Lepas dari mesin ${device.name}`}
+                style={{ border: "none", background: "transparent", color: "inherit", cursor: "pointer", padding: 0, marginLeft: "2px", display: "flex" }}>
+                <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>close</span>
+              </button>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -57,13 +69,16 @@ export default function Employees() {
   const [isLoadingList, setIsLoadingList] = useState(true);
   const [metrics, setMetrics] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState({ uid: "", name: "", department: "" });
+  const [formData, setFormData] = useState({ uid: "", name: "", department: "", link: null });
   const [editFormData, setEditFormData] = useState({ uid: "", name: "", department: "" });
   const [deleteModal, setDeleteModal] = useState({ open: false, employee: null });
   const [leaveModal, setLeaveModal] = useState(emptyLeave);
   const [addModal, setAddModal] = useState(false);
   const [editModal, setEditModal] = useState({ open: false, employee: null });
   const [bulkModal, setBulkModal] = useState({ open: false, selected: [], department: "" });
+  const [linkModal, setLinkModal] = useState({ open: false, item: null, employeeUid: "", filter: "" });
+  const [unlinkModal, setUnlinkModal] = useState({ open: false, employee: null, device: null });
+  const [allEmployees, setAllEmployees] = useState([]);
   const [notification, setNotification] = useState(null);
   const [search, setSearch] = useState("");
   const [sortConfig, setSortConfig] = useState({ col: null, dir: 'asc' });
@@ -129,28 +144,86 @@ export default function Employees() {
     return () => clearInterval(iv);
   }, [fetchEmployees, fetchMetrics]);
 
-  const openAddModal = (prefill = {}) => {
-    setFormData({ uid: "", name: "", department: "", ...prefill });
+  const refreshAll = () => {
+    fetchEmployees();
+    fetchMetrics();
+  };
+
+  // Tanpa `item`: tambah Pejuang manual. Dengan `item` (user mesin): Pejuang baru
+  // langsung dihubungkan ke user mesin itu dan nomornya dipilih otomatis.
+  const openAddModal = (item = null) => {
+    setFormData(item
+      ? { uid: "", name: item.name || "", department: "", link: { device_id: item.device_id, device_uid: item.device_uid, device_name: item.device_name } }
+      : { uid: "", name: "", department: "", link: null });
     setAddModal(true);
+  };
+
+  const openLinkModal = async (item) => {
+    setLinkModal({ open: true, item, employeeUid: item.suggestion ? String(item.suggestion.uid) : "", filter: "" });
+    try {
+      const res = await fetch("/api/employees");
+      const json = await res.json();
+      setAllEmployees(json.data || []);
+    } catch (e) { console.error(e); }
+  };
+
+  const saveLink = async (deviceIdValue, deviceUid, employeeUid) => {
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/enrollments", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: deviceIdValue, device_uid: deviceUid, employee_uid: employeeUid }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Gagal menyimpan pemetaan");
+      showNotif(json.message || "Pemetaan disimpan.");
+      return true;
+    } catch (err) {
+      showNotif(err.message || "Gagal menyimpan pemetaan", "error");
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleLinkSubmit = async (e) => {
+    e.preventDefault();
+    if (!linkModal.employeeUid) return;
+    if (await saveLink(linkModal.item.device_id, linkModal.item.device_uid, Number(linkModal.employeeUid))) {
+      setLinkModal({ open: false, item: null, employeeUid: "", filter: "" });
+      refreshAll();
+    }
+  };
+
+  const handleUnlink = async () => {
+    const { device: target } = unlinkModal;
+    if (await saveLink(target.id, target.device_uid, null)) {
+      setUnlinkModal({ open: false, employee: null, device: null });
+      refreshAll();
+    }
   };
 
   // Hanya user mesin yang punya nama yang bisa didaftarkan sekaligus.
   const registerable = unregistered.filter((item) => item.name);
 
   const openBulkModal = () => {
-    setBulkModal({ open: true, selected: registerable.map((item) => item.uid), department: "" });
+    // Yang mirip Pejuang yang sudah ada tidak dicentang: lebih tepat dihubungkan.
+    setBulkModal({ open: true, selected: registerable.filter((item) => !item.suggestion).map(enrollmentKey), department: "" });
   };
 
-  const toggleBulkUid = (uid) => {
+  const toggleBulkKey = (key) => {
     setBulkModal((state) => ({
       ...state,
-      selected: state.selected.includes(uid) ? state.selected.filter((value) => value !== uid) : [...state.selected, uid],
+      selected: state.selected.includes(key) ? state.selected.filter((value) => value !== key) : [...state.selected, key],
     }));
   };
 
   const handleBulkSubmit = async (e) => {
     e.preventDefault();
-    const items = registerable.filter((item) => bulkModal.selected.includes(item.uid)).map(({ uid, name }) => ({ uid, name }));
+    const items = registerable
+      .filter((item) => bulkModal.selected.includes(enrollmentKey(item)))
+      .map(({ device_id, device_uid, name }) => ({ device_id, device_uid, name }));
     if (items.length === 0) {
       showNotif("Pilih minimal satu user mesin.", "error");
       return;
@@ -166,8 +239,7 @@ export default function Employees() {
       if (!res.ok) throw new Error(json.error || "Gagal mendaftarkan Pejuang");
       showNotif(json.message || "Pejuang berhasil didaftarkan!");
       setBulkModal({ open: false, selected: [], department: "" });
-      fetchEmployees();
-      fetchMetrics();
+      refreshAll();
     } catch (err) {
       showNotif(err.message || "Gagal mendaftarkan Pejuang", "error");
     } finally {
@@ -193,8 +265,8 @@ export default function Employees() {
       if (!res.ok) throw new Error(await readError(res, "Gagal menyimpan data"));
       showNotif("Pejuang berhasil ditambahkan!", "success");
       setAddModal(false);
-      setFormData({ uid: "", name: "", department: "" });
-      fetchEmployees();
+      setFormData({ uid: "", name: "", department: "", link: null });
+      refreshAll();
     } catch (err) {
       showNotif(err.message || "Gagal menyimpan data", "error");
     } finally {
@@ -505,7 +577,8 @@ export default function Employees() {
                       )}
                     </td>
                     <td style={{ padding: "14px 20px" }}>
-                      <DeviceChips devices={emp.devices} personName={emp.name} />
+                      <DeviceChips devices={emp.devices} personName={emp.name}
+                        onUnlink={isSuperAdmin ? (target) => setUnlinkModal({ open: true, employee: emp, device: target }) : null} />
                     </td>
                     {isSuperAdmin && (
                     <td style={{ padding: "14px 20px", width: "1%", whiteSpace: "nowrap" }}>
@@ -575,7 +648,8 @@ export default function Employees() {
                   <span style={{ marginLeft: "8px", fontSize: "12px", fontWeight: 600, background: "rgba(239,68,68,0.08)", color: "var(--color-error)", padding: "2px 10px", borderRadius: "20px" }}>{unregistered.length}</span>
                 </div>
                 <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-outline)" }}>
-                  UID ini tercatat di mesin{!isAll && device ? ` ${device.name}` : ""}, tetapi belum ada di data Pejuang sehingga scan-nya terhitung &quot;Tidak Dikenali&quot;.
+                  User ini ada di mesin{!isAll && device ? ` ${device.name}` : ""}, tetapi belum dihubungkan ke Pejuang sehingga scan-nya terhitung &quot;Tidak Dikenali&quot;.
+                  Hubungkan ke Pejuang yang sudah ada, atau tambahkan sebagai Pejuang baru.
                 </p>
               </div>
               {isSuperAdmin && registerable.length > 0 && (
@@ -590,28 +664,36 @@ export default function Employees() {
               <table style={{ width: "100%", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
                 <thead>
                   <tr style={{ background: "var(--color-background)", borderBottom: "1px solid #e4efff" }}>
-                    {["UID", "Nama di Mesin", "Mesin", ...(isSuperAdmin ? ["Aksi"] : [])].map((label) => (
+                    {["UID Mesin", "Nama di Mesin", "Mesin", "Kemungkinan Pejuang", ...(isSuperAdmin ? ["Aksi"] : [])].map((label) => (
                       <th key={label} style={{ padding: "12px 20px", textAlign: "left", fontSize: "12px", fontFamily: "'JetBrains Mono', monospace", color: "var(--color-outline)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>{label}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {unregistered.map((item) => (
-                    <tr key={item.uid} style={{ borderBottom: "1px solid #f0f4ff" }}>
+                    <tr key={enrollmentKey(item)} style={{ borderBottom: "1px solid #f0f4ff" }}>
                       <td style={{ padding: "12px 20px", width: "1%" }}>
-                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", background: "var(--color-surface-container-high)", color: "var(--color-primary)", padding: "3px 10px", borderRadius: "6px", fontWeight: 600 }}>{item.uid}</span>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", background: "var(--color-surface-container-high)", color: "var(--color-primary)", padding: "3px 10px", borderRadius: "6px", fontWeight: 600 }}>{item.device_uid}</span>
                       </td>
                       <td style={{ padding: "12px 20px", fontSize: "14px", color: item.name ? "var(--color-on-background)" : "var(--color-outline)" }}>
                         {item.name || "(tanpa nama di mesin)"}
                       </td>
-                      <td style={{ padding: "12px 20px" }}><DeviceChips devices={item.devices} /></td>
+                      <td style={{ padding: "12px 20px" }}><span style={chipStyle}>{item.device_name}</span></td>
+                      <td style={{ padding: "12px 20px", fontSize: "13px", color: item.suggestion ? "var(--color-on-background)" : "var(--color-outline-variant)" }}>
+                        {item.suggestion ? `${item.suggestion.name} (#${item.suggestion.uid})` : "—"}
+                      </td>
                       {isSuperAdmin && (
                         <td style={{ padding: "12px 20px", width: "1%" }}>
-                          <button onClick={() => openAddModal({ uid: String(item.uid), name: item.name })}
-                            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "7px 12px", border: "1px solid var(--color-primary)", borderRadius: "8px", background: "transparent", color: "var(--color-primary)", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>
-                            <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>person_add</span>
-                            Tambahkan
-                          </button>
+                          <div style={{ display: "flex", gap: "6px" }}>
+                            <button onClick={() => openLinkModal(item)} style={smallButtonStyle} title="Hubungkan ke Pejuang yang sudah ada">
+                              <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>link</span>
+                              Hubungkan
+                            </button>
+                            <button onClick={() => openAddModal(item)} style={smallButtonStyle} title="Tambahkan sebagai Pejuang baru">
+                              <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>person_add</span>
+                              Tambahkan
+                            </button>
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -626,8 +708,16 @@ export default function Employees() {
       {/* ── Add Employee Modal ───────────────────────────────────────────── */}
       <Modal isOpen={addModal} onClose={() => setAddModal(false)} title="Tambah Pejuang Baru" size="sm">
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {formData.link && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 12px", background: "var(--color-surface-container)", borderRadius: "8px", fontSize: "13px", color: "var(--color-on-background)" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-primary)" }}>link</span>
+              Dihubungkan ke UID {formData.link.device_uid} di mesin {formData.link.device_name}
+            </div>
+          )}
           {[
-            { key: "uid", label: "Device UID", type: "number", placeholder: "contoh: 5", required: true },
+            formData.link
+              ? { key: "uid", label: "Nomor Pejuang (opsional)", type: "number", placeholder: "Kosongkan agar dipilih otomatis", required: false }
+              : { key: "uid", label: "Nomor Pejuang", type: "number", placeholder: "contoh: 5", required: true },
             { key: "name", label: "Nama Lengkap", type: "text", placeholder: "Nama Pejuang", required: true },
             { key: "department", label: "Departemen", type: "text", placeholder: "contoh: HRD", required: false },
           ].map(field => (
@@ -676,7 +766,7 @@ export default function Employees() {
       <Modal isOpen={editModal.open} onClose={() => setEditModal({ open: false, employee: null })} title="Edit Data Pejuang" size="sm">
         <form onSubmit={handleEditSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {[
-            { key: "uid", label: "Device UID", type: "number", disabled: true },
+            { key: "uid", label: "Nomor Pejuang", type: "number", disabled: true },
             { key: "name", label: "Nama Lengkap", type: "text", required: true },
             { key: "department", label: "Departemen", type: "text", required: false },
           ].map(field => (
@@ -795,7 +885,8 @@ export default function Employees() {
       <Modal isOpen={bulkModal.open} onClose={() => setBulkModal({ ...bulkModal, open: false })} title="Daftarkan User Mesin" size="sm">
         <form onSubmit={handleBulkSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <p style={{ margin: 0, fontSize: "13px", color: "var(--color-outline)", lineHeight: 1.6 }}>
-            User yang dicentang didaftarkan sebagai Pejuang memakai nama di mesin. Hapus centang akun yang bukan orang (misalnya &quot;Admin&quot;).
+            User yang dicentang didaftarkan sebagai Pejuang baru memakai nama di mesin. Hapus centang akun yang bukan orang (misalnya &quot;Admin&quot;).
+            User yang mirip Pejuang yang sudah ada tidak dicentang; sebaiknya dihubungkan agar tidak tercatat dua kali.
             {unregistered.length > registerable.length && ` ${unregistered.length - registerable.length} UID tanpa nama di mesin tidak ikut; tambahkan satu per satu.`}
           </p>
           <div>
@@ -807,16 +898,19 @@ export default function Employees() {
           <div style={{ border: "1px solid var(--color-outline-variant)", borderRadius: "10px", overflow: "hidden" }}>
             <label style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", background: "var(--color-background)", borderBottom: "1px solid var(--color-outline-variant)", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>
               <input type="checkbox" checked={bulkModal.selected.length === registerable.length}
-                onChange={e => setBulkModal({ ...bulkModal, selected: e.target.checked ? registerable.map((item) => item.uid) : [] })} />
+                onChange={e => setBulkModal({ ...bulkModal, selected: e.target.checked ? registerable.map(enrollmentKey) : [] })} />
               Pilih semua ({bulkModal.selected.length}/{registerable.length})
             </label>
             <div style={{ maxHeight: "300px", overflowY: "auto" }}>
               {registerable.map((item) => (
-                <label key={item.uid} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 14px", borderBottom: "1px solid #f0f4ff", fontSize: "13px", cursor: "pointer" }}>
-                  <input type="checkbox" checked={bulkModal.selected.includes(item.uid)} onChange={() => toggleBulkUid(item.uid)} />
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: "var(--color-primary)", minWidth: "36px" }}>{item.uid}</span>
-                  <span style={{ flex: 1, color: "var(--color-on-background)" }}>{item.name}</span>
-                  <span style={{ fontSize: "12px", color: "var(--color-outline)" }}>{item.devices.map((d) => d.name).join(", ")}</span>
+                <label key={enrollmentKey(item)} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 14px", borderBottom: "1px solid #f0f4ff", fontSize: "13px", cursor: "pointer" }}>
+                  <input type="checkbox" checked={bulkModal.selected.includes(enrollmentKey(item))} onChange={() => toggleBulkKey(enrollmentKey(item))} />
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: "var(--color-primary)", minWidth: "36px" }}>{item.device_uid}</span>
+                  <span style={{ flex: 1, color: "var(--color-on-background)" }}>
+                    {item.name}
+                    {item.suggestion && <span style={{ display: "block", fontSize: "11px", color: "#a16207" }}>mirip Pejuang {item.suggestion.name} (#{item.suggestion.uid})</span>}
+                  </span>
+                  <span style={{ fontSize: "12px", color: "var(--color-outline)" }}>{item.device_name}</span>
                 </label>
               ))}
             </div>
@@ -837,6 +931,78 @@ export default function Employees() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* ── Link Machine User Modal ───────────────────────────────────────── */}
+      <Modal isOpen={linkModal.open} onClose={() => setLinkModal({ ...linkModal, open: false })} title="Hubungkan ke Pejuang" size="sm">
+        {linkModal.item && (
+          <form onSubmit={handleLinkSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div style={{ padding: "10px 12px", background: "var(--color-surface-container)", borderRadius: "8px", fontSize: "13px", color: "var(--color-on-background)" }}>
+              UID <strong>{linkModal.item.device_uid}</strong> di mesin <strong>{linkModal.item.device_name}</strong>
+              {linkModal.item.name ? <> (nama di mesin: <strong>{linkModal.item.name}</strong>)</> : " (tanpa nama di mesin)"}
+            </div>
+            <input type="text" placeholder="Cari nama atau nomor Pejuang..." value={linkModal.filter}
+              onChange={e => setLinkModal({ ...linkModal, filter: e.target.value })} style={fieldStyle} />
+            <select required size={8} value={linkModal.employeeUid} onChange={e => setLinkModal({ ...linkModal, employeeUid: e.target.value })}
+              style={{ ...fieldStyle, padding: "6px" }}>
+              {allEmployees
+                .filter((emp) => {
+                  const term = linkModal.filter.trim().toLowerCase();
+                  return !term || emp.name.toLowerCase().includes(term) || String(emp.uid).includes(term) || String(emp.uid) === linkModal.employeeUid;
+                })
+                .map((emp) => (
+                  <option key={emp.uid} value={emp.uid}>
+                    #{emp.uid} {emp.name}{emp.department ? ` — ${emp.department}` : ""}{emp.devices?.length ? ` [${emp.devices.map((d) => d.name).join(", ")}]` : ""}
+                  </option>
+                ))}
+            </select>
+            <small style={{ color: "var(--color-outline)", fontSize: "12px" }}>
+              Scan UID ini di mesin {linkModal.item.device_name} akan tercatat atas nama Pejuang yang dipilih, termasuk scan lama.
+            </small>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => setLinkModal({ ...linkModal, open: false })} style={{
+                padding: "10px 18px", border: "1px solid #c3c6d6", borderRadius: "8px",
+                background: "var(--color-surface)", fontSize: "13px", fontWeight: 600, cursor: "pointer", color: "var(--color-on-background)",
+              }}>Batal</button>
+              <button type="submit" disabled={isSubmitting || !linkModal.employeeUid} style={{
+                padding: "10px 18px", background: "var(--color-primary)", border: "none",
+                borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "var(--color-surface)",
+                cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
+                opacity: isSubmitting || !linkModal.employeeUid ? 0.6 : 1,
+              }}>
+                <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>link</span>
+                {isSubmitting ? "Menyimpan..." : "Hubungkan"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ── Unlink Confirmation Modal ─────────────────────────────────────── */}
+      <Modal isOpen={unlinkModal.open} onClose={() => setUnlinkModal({ open: false, employee: null, device: null })} title="Lepas dari Mesin" size="sm">
+        {unlinkModal.device && (
+          <>
+            <p style={{ margin: "0 0 20px", fontSize: "13px", color: "var(--color-on-background)", lineHeight: 1.6 }}>
+              Lepas UID <strong>{unlinkModal.device.device_uid}</strong> di mesin <strong>{unlinkModal.device.name}</strong>
+              {unlinkModal.device.machine_name ? <> (&quot;{unlinkModal.device.machine_name}&quot;)</> : null} dari Pejuang <strong>{unlinkModal.employee?.name}</strong>?
+              Scan UID itu di mesin tersebut tidak lagi tercatat atas nama {unlinkModal.employee?.name}, dan user mesinnya kembali ke daftar belum terdaftar.
+            </p>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button onClick={() => setUnlinkModal({ open: false, employee: null, device: null })} style={{
+                padding: "10px 18px", border: "1px solid #c3c6d6", borderRadius: "8px",
+                background: "var(--color-surface)", fontSize: "13px", fontWeight: 600, cursor: "pointer", color: "var(--color-on-background)",
+              }}>Batal</button>
+              <button onClick={handleUnlink} disabled={isSubmitting} style={{
+                padding: "10px 18px", background: "var(--color-error)", border: "none",
+                borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "var(--color-surface)",
+                cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", opacity: isSubmitting ? 0.6 : 1,
+              }}>
+                <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>link_off</span>
+                Lepas
+              </button>
+            </div>
+          </>
+        )}
       </Modal>
 
       {/* ── Delete Confirmation Modal ────────────────────────────────────── */}

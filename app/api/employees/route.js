@@ -2,24 +2,18 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
 import { findDevice, parseDeviceId } from '@/lib/devices';
+import { allocateEmployeeUids, autoLinkEnrollments, setEnrollmentLink } from '@/lib/enrollments';
+import { sameName } from '@/lib/names';
 
-// UID yang tercatat di mesin: dari daftar user mesin (sinkronisasi) maupun dari
-// log scan, karena mesin lama (LEGACY-01) hanya punya log tanpa daftar user.
-async function listDevicePresence(deviceId) {
-  const deviceFilter = deviceId ? 'WHERE device_id = ?' : '';
-  const params = deviceId ? [deviceId, deviceId] : [];
+// User di setiap mesin aktif beserta Pejuang yang dipetakan kepadanya.
+async function listEnrollments(deviceId) {
   return query(`
-    SELECT x.device_id, x.device_uid, COALESCE(de.employee_uid, x.device_uid) AS uid,
-           COALESCE(de.display_name, '') AS display_name, d.name AS device_name
-    FROM (
-      SELECT device_id, device_uid FROM device_enrollments ${deviceFilter}
-      UNION
-      SELECT DISTINCT device_id, uid FROM attendance_logs ${deviceFilter}
-    ) x
-    JOIN devices d ON d.id = x.device_id AND d.is_active = 1
-    LEFT JOIN device_enrollments de ON de.device_id = x.device_id AND de.device_uid = x.device_uid
-    ORDER BY d.name ASC
-  `, params);
+    SELECT de.device_id, de.device_uid, de.employee_uid, de.display_name, d.name AS device_name
+    FROM device_enrollments de
+    JOIN devices d ON d.id = de.device_id AND d.is_active = 1
+    ${deviceId ? 'WHERE de.device_id = ?' : ''}
+    ORDER BY d.name ASC, de.device_uid ASC
+  `, deviceId ? [deviceId] : []);
 }
 
 export async function GET(request) {
@@ -28,7 +22,7 @@ export async function GET(request) {
     if (!user) return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
     const departmentFilter = (user.role === 'manager' && user.department) ? user.department : null;
 
-    // Tanpa device_id (atau "all") semua Pejuang dikembalikan, seperti sebelumnya.
+    // Tanpa device_id (atau "all") semua Pejuang dikembalikan.
     const requestedDevice = new URL(request.url).searchParams.get('device_id');
     let device = null;
     if (requestedDevice && requestedDevice !== 'all') {
@@ -36,43 +30,38 @@ export async function GET(request) {
       if (!device) return NextResponse.json({ error: 'Mesin tidak ditemukan atau tidak aktif.' }, { status: 404 });
     }
 
-    let sql = `SELECT * FROM employees`;
-    const params = [];
-    if (departmentFilter) {
-      sql += ` WHERE department = ?`;
-      params.push(departmentFilter);
-    }
-    sql += ` ORDER BY name ASC`;
+    const [allEmployees, enrollments] = await Promise.all([
+      query(`SELECT * FROM employees ORDER BY name ASC`),
+      listEnrollments(device?.id),
+    ]);
+    const employeesByUid = new Map(allEmployees.map((employee) => [employee.uid, employee]));
 
-    const [rows, presence] = await Promise.all([query(sql, params), listDevicePresence(device?.id)]);
-
-    const devicesByUid = new Map();
-    for (const row of presence) {
-      const list = devicesByUid.get(row.uid) || [];
-      // machine_name dipakai halaman Pejuang untuk menandai UID yang sama dipakai
-      // orang berbeda di mesin lain (data Pejuang dicocokkan hanya lewat nomor UID).
-      if (!list.some((item) => item.id === row.device_id)) list.push({ id: row.device_id, name: row.device_name, machine_name: row.display_name });
-      devicesByUid.set(row.uid, list);
-    }
-
-    const employees = rows
-      .map((employee) => ({ ...employee, devices: devicesByUid.get(employee.uid) || [] }))
-      .filter((employee) => !device || employee.devices.length > 0);
-
-    // User mesin yang belum punya data Pejuang. Departemennya belum diketahui,
-    // jadi tidak ditampilkan untuk akun yang dibatasi per departemen.
-    const knownUids = new Set((departmentFilter ? await query('SELECT uid FROM employees') : rows).map((row) => row.uid));
-    const unregisteredByUid = new Map();
-    if (!departmentFilter) {
-      for (const row of presence) {
-        if (knownUids.has(row.uid)) continue;
-        const entry = unregisteredByUid.get(row.uid) || { uid: row.uid, name: '', devices: [] };
-        if (!entry.name && row.display_name) entry.name = row.display_name;
-        if (!entry.devices.some((item) => item.id === row.device_id)) entry.devices.push({ id: row.device_id, name: row.device_name });
-        unregisteredByUid.set(row.uid, entry);
+    const devicesByEmployee = new Map();
+    const unregistered = [];
+    for (const row of enrollments) {
+      if (row.employee_uid !== null && employeesByUid.has(row.employee_uid)) {
+        const list = devicesByEmployee.get(row.employee_uid) || [];
+        list.push({ id: row.device_id, name: row.device_name, device_uid: row.device_uid, machine_name: row.display_name });
+        devicesByEmployee.set(row.employee_uid, list);
+        continue;
       }
+      // Departemen user mesin yang belum dipetakan belum diketahui, jadi tidak
+      // ditampilkan untuk akun yang dibatasi per departemen.
+      if (departmentFilter) continue;
+      const suggestion = row.display_name ? allEmployees.find((employee) => sameName(employee.name, row.display_name)) : null;
+      unregistered.push({
+        device_id: row.device_id,
+        device_name: row.device_name,
+        device_uid: row.device_uid,
+        name: row.display_name,
+        suggestion: suggestion ? { uid: suggestion.uid, name: suggestion.name } : null,
+      });
     }
-    const unregistered = [...unregisteredByUid.values()].sort((a, b) => a.uid - b.uid);
+
+    const employees = allEmployees
+      .filter((employee) => !departmentFilter || employee.department === departmentFilter)
+      .map((employee) => ({ ...employee, devices: devicesByEmployee.get(employee.uid) || [] }))
+      .filter((employee) => !device || employee.devices.length > 0);
 
     return NextResponse.json({
       data: employees,
@@ -84,6 +73,8 @@ export async function GET(request) {
   }
 }
 
+// Menambah Pejuang. Dengan `link` ({ device_id, device_uid }) Pejuang langsung
+// dihubungkan ke user mesin itu; nomor Pejuang boleh dikosongkan agar dipilih otomatis.
 export async function POST(request) {
   try {
     const user = await getUserSession(request);
@@ -91,14 +82,30 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Akses ditolak. Hanya superadmin dan SDM yang dapat menambah data.' }, { status: 403 });
     }
 
-    const { uid, name, department } = await request.json();
-    await query(
-      `INSERT INTO employees (uid, name, department) VALUES (?, ?, ?)`,
-      [uid, name, department]
-    );
-    return NextResponse.json({ message: 'Employee added successfully' });
+    const body = await request.json().catch(() => ({}));
+    const name = String(body.name || '').trim();
+    const department = String(body.department || '').trim();
+    const link = body.link ? { deviceId: parseDeviceId(body.link.device_id), deviceUid: Number.parseInt(body.link.device_uid, 10) } : null;
+    const hasUid = body.uid !== undefined && body.uid !== null && String(body.uid).trim() !== '';
+    let uid = hasUid ? Number.parseInt(body.uid, 10) : null;
+
+    if (!name || name.length > 255 || department.length > 255 || (hasUid && (!Number.isInteger(uid) || uid < 1))) {
+      return NextResponse.json({ error: 'Nama wajib diisi dan nomor Pejuang harus angka positif.' }, { status: 422 });
+    }
+    if (!hasUid && !link) return NextResponse.json({ error: 'Nomor Pejuang wajib diisi.' }, { status: 422 });
+    if (link && (!link.deviceId || !Number.isInteger(link.deviceUid))) {
+      return NextResponse.json({ error: 'User mesin yang akan dihubungkan tidak valid.' }, { status: 422 });
+    }
+
+    if (!hasUid) [uid] = await allocateEmployeeUids([link.deviceUid]);
+    await query(`INSERT INTO employees (uid, name, department) VALUES (?, ?, ?)`, [uid, name, department]);
+
+    if (link) await setEnrollmentLink(link.deviceId, link.deviceUid, uid);
+    else await autoLinkEnrollments();
+
+    return NextResponse.json({ message: 'Pejuang berhasil ditambahkan.', uid });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') return NextResponse.json({ error: 'UID ini sudah terdaftar sebagai Pejuang.' }, { status: 409 });
+    if (error.code === 'ER_DUP_ENTRY') return NextResponse.json({ error: 'Nomor Pejuang ini sudah dipakai.' }, { status: 409 });
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

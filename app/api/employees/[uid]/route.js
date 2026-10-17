@@ -42,6 +42,9 @@ export async function DELETE(request, { params }) {
     }
 
     await query(`DELETE FROM employees WHERE uid = ?`, [uid]);
+    // User mesinnya kembali ke daftar "belum terdaftar"; nomor Pejuang yang sama
+    // bisa dipakai orang lain nanti, jadi pemetaan lama tidak boleh tertinggal.
+    await query(`UPDATE device_enrollments SET employee_uid = NULL, link_locked = 0 WHERE employee_uid = ?`, [uid]);
     return NextResponse.json({ message: 'Employee deleted' });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
