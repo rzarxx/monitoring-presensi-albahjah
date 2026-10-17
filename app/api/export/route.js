@@ -24,7 +24,7 @@ export async function GET(request) {
 
     if (date_from)  { conditions.push(`DATE(a.timestamp) >= ?`); params.push(date_from); }
     if (date_to)    { conditions.push(`DATE(a.timestamp) <= ?`); params.push(date_to); }
-    if (search)     { conditions.push(`(e.name LIKE ? OR CAST(a.uid AS CHAR) = ?)`); params.push(`%${search}%`, search); }
+    if (search)     { conditions.push(`(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)`); params.push(`%${search}%`, `%${search}%`, search); }
     if (department) { conditions.push(`e.department LIKE ?`); params.push(`%${department}%`); }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -42,7 +42,7 @@ export async function GET(request) {
         COUNT(a.id)              AS total_scan
       FROM attendance_logs a
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
-      LEFT JOIN employees e ON e.uid = COALESCE(de.employee_uid, a.uid)
+      LEFT JOIN employees e ON e.uid = de.employee_uid
       ${where}
       GROUP BY DATE_FORMAT(a.timestamp, '%Y-%m-%d'), a.uid
       ORDER BY nama ASC, tgl ASC

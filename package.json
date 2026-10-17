@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "migrate:devices": "node scripts/migrate-multi-device.js"
+    "migrate:devices": "node scripts/migrate-multi-device.js",
+    "migrate:mapping": "node scripts/migrate-employee-mapping.js"
   },
   "dependencies": {
     "jose": "^6.2.8",

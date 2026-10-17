@@ -3,6 +3,7 @@ import { query } from '@/lib/db';
 import { getZkData, runDeviceJob } from '@/lib/zkteco';
 import { getUserSession } from '@/lib/auth';
 import { findDevice, parseDeviceId } from '@/lib/devices';
+import { autoLinkEnrollments, ensureEnrollments } from '@/lib/enrollments';
 
 const pad = (value) => String(value).padStart(2, '0');
 const formatLocal = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
@@ -75,6 +76,11 @@ async function syncDevice(device, full) {
     const result = await query(`INSERT IGNORE INTO attendance_logs (device_id, uid, timestamp, state) VALUES ?`, [values.slice(index, index + 5000)]);
     totalInserted += result.affectedRows || 0;
   }
+
+  // Setiap UID yang scan butuh baris pemetaan (juga user yang sudah dihapus dari
+  // mesin), lalu yang nomor dan namanya cocok dengan Pejuang dihubungkan otomatis.
+  await ensureEnrollments(device.id, values.map((value) => value[1]));
+  await autoLinkEnrollments(device.id);
 
   return {
     message: logs.length ? 'Sinkronisasi berhasil.' : 'Tidak ada data absensi dari mesin.',

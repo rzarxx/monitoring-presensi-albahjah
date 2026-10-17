@@ -28,7 +28,7 @@ export default function EmployeeProfile() {
 
       // 2. Get 7-Day Stats for this user
       const statsRes = deviceId
-        ? await fetch(`/api/stats?uid=${encodeURIComponent(uid)}&device_id=${encodeURIComponent(deviceId)}`)
+        ? await fetch(`/api/stats?employee_uid=${encodeURIComponent(uid)}&device_id=${encodeURIComponent(deviceId)}`)
         : null;
       if (statsRes?.ok) {
         const statsJson = await statsRes.json();
@@ -37,7 +37,7 @@ export default function EmployeeProfile() {
 
       // 3. Get Recent Logs for this user
       const logsRes = deviceId
-        ? await fetch(`/api/logs?search=${encodeURIComponent(uid)}&limit=10&device_id=${encodeURIComponent(deviceId)}`)
+        ? await fetch(`/api/logs?employee_uid=${encodeURIComponent(uid)}&limit=10&device_id=${encodeURIComponent(deviceId)}`)
         : null;
       if (logsRes?.ok) {
         const logsJson = await logsRes.json();
@@ -108,7 +108,7 @@ export default function EmployeeProfile() {
                 <p style={{ margin: "0", fontSize: "14px", fontWeight: 500, color: "var(--color-on-background)" }}>{employee.department || "-"}</p>
                 <p style={{ margin: "12px 0 4px", fontSize: "11px", color: "var(--color-outline)", textTransform: "uppercase", fontWeight: 600 }}>Tercatat di Mesin</p>
                 <p style={{ margin: "0", fontSize: "14px", fontWeight: 500, color: "var(--color-on-background)" }}>
-                  {employee.devices?.length ? employee.devices.map((item) => item.name).join(", ") : "-"}
+                  {employee.devices?.length ? employee.devices.map((item) => `${item.name} (UID ${item.device_uid})`).join(", ") : "-"}
                 </p>
               </div>
             </div>

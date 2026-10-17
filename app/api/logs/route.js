@@ -27,24 +27,28 @@ export async function GET(request) {
     const orderColumn = sortableColumns[searchParams.get('sortCol')] || sortableColumns.date;
     const orderDirection = String(searchParams.get('sortDir') || 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
     const department = user.role === 'manager' && user.department ? user.department : null;
+    // Profil Pejuang memfilter lewat pemetaan, bukan nomor UID mesin.
+    const employeeUid = Number.parseInt(searchParams.get('employee_uid') || '', 10);
 
     const conditions = ['a.device_id = ?'];
     const params = [device.id];
     if (date) { conditions.push('DATE(a.timestamp) = ?'); params.push(date); }
     else conditions.push('DATE(a.timestamp) = CURDATE()');
     if (department) { conditions.push('e.department = ?'); params.push(department); }
-    if (search) { conditions.push('(e.name LIKE ? OR CAST(a.uid AS CHAR) = ?)'); params.push(`%${search}%`, search); }
+    if (search) { conditions.push('(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)'); params.push(`%${search}%`, `%${search}%`, search); }
+    if (Number.isInteger(employeeUid)) { conditions.push('de.employee_uid = ?'); params.push(employeeUid); }
     const where = `WHERE ${conditions.join(' AND ')}`;
 
     const rawConditions = ['a.device_id = ?'];
     const rawParams = [device.id];
     if (department) { rawConditions.push('e.department = ?'); rawParams.push(department); }
-    if (search) { rawConditions.push('(e.name LIKE ? OR CAST(a.uid AS CHAR) = ?)'); rawParams.push(`%${search}%`, search); }
+    if (search) { rawConditions.push('(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)'); rawParams.push(`%${search}%`, `%${search}%`, search); }
+    if (Number.isInteger(employeeUid)) { rawConditions.push('de.employee_uid = ?'); rawParams.push(employeeUid); }
     const rawLogs = await query(`
       SELECT a.id, a.uid AS device_uid, a.timestamp, a.state, COALESCE(e.name, de.display_name, CONCAT('UID_', a.uid)) AS name, e.department
       FROM attendance_logs a
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
-      LEFT JOIN employees e ON e.uid = COALESCE(de.employee_uid, a.uid)
+      LEFT JOIN employees e ON e.uid = de.employee_uid
       WHERE ${rawConditions.join(' AND ')}
       ORDER BY a.timestamp DESC LIMIT 100
     `, rawParams);
@@ -57,7 +61,7 @@ export async function GET(request) {
              COUNT(a.id) AS scan_count, NULL AS leave_type
       FROM attendance_logs a
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
-      LEFT JOIN employees e ON e.uid = COALESCE(de.employee_uid, a.uid)
+      LEFT JOIN employees e ON e.uid = de.employee_uid
       ${where}
       GROUP BY DATE(a.timestamp), a.uid, e.name, de.display_name, e.department
       ORDER BY ${orderColumn} ${orderDirection}, name ASC
@@ -68,7 +72,7 @@ export async function GET(request) {
       SELECT COUNT(*) AS count FROM (
         SELECT DATE(a.timestamp), a.uid FROM attendance_logs a
         LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
-        LEFT JOIN employees e ON e.uid = COALESCE(de.employee_uid, a.uid)
+        LEFT JOIN employees e ON e.uid = de.employee_uid
         ${where}
         GROUP BY DATE(a.timestamp), a.uid
       ) grouped
@@ -80,7 +84,7 @@ export async function GET(request) {
              SUM(CASE WHEN e.uid IS NULL THEN 1 ELSE 0 END) AS unauthorized
       FROM attendance_logs a
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
-      LEFT JOIN employees e ON e.uid = COALESCE(de.employee_uid, a.uid)
+      LEFT JOIN employees e ON e.uid = de.employee_uid
       WHERE a.device_id = ? AND DATE(a.timestamp) = CURDATE()
     `, [device.id]);
 
