@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import net from 'net';
+import { isDeviceBusy } from '@/lib/zkteco';
 import { getUserSession } from '@/lib/auth';
 import { requireDevice } from '@/lib/devices';
 
@@ -8,7 +9,8 @@ export async function GET(request) {
     const user = await getUserSession(request);
     if (!user) return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
     const device = await requireDevice(new URL(request.url).searchParams);
-    const online = await new Promise((resolve) => {
+    // Membuka koneksi saat sinkronisasi berjalan akan memutus sesi sinkronisasi.
+    const online = isDeviceBusy(device) || await new Promise((resolve) => {
       const socket = new net.Socket();
       socket.setTimeout(2000);
       socket.once('connect', () => { socket.destroy(); resolve(true); });

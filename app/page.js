@@ -127,7 +127,8 @@ export default function Home() {
   }, [selectedDeviceId]);
 
   // Auto-sync & Real-time setup
-  const isSyncingRef = useRef(false);
+  const autoSyncRef = useRef(false);
+  const manualSyncRef = useRef(false);
 
   useEffect(() => {
     if (!selectedDeviceId) return;
@@ -153,41 +154,52 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchLogs, fetchMachineStatus, fetchChartData, selectedDeviceId, canSync]);
 
-  // Manual & Silent sync (dengan Lock Guard agar tidak bertabrakan)
+  // Manual & Silent sync. Auto-sync dilewati bila ada sinkronisasi lain, tetapi klik
+  // manual selalu dikirim: server menggabungkannya dengan sinkronisasi yang sedang berjalan.
   async function handleSync(full = false, silent = false) {
     if (!selectedDeviceId) {
       if (!silent) setSyncModal({ open: true, success: false, message: "Pilih mesin terlebih dahulu." });
       return;
     }
-    if (isSyncingRef.current) return;
-    isSyncingRef.current = true;
-    if (!silent) setIsSyncing(true);
+    if (silent) {
+      if (autoSyncRef.current || manualSyncRef.current || document.visibilityState !== "visible") return;
+      autoSyncRef.current = true;
+    } else {
+      if (manualSyncRef.current) return;
+      manualSyncRef.current = true;
+      setIsSyncing(true);
+    }
     try {
       const res = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ full, device_id: Number(selectedDeviceId) }),
       });
-      const json = await res.json();
-      
+      // Gateway/proxy yang timeout mengembalikan HTML, bukan JSON.
+      const json = await res.json().catch(() => ({}));
+
       if (!silent) {
         setSyncModal({
           open: true,
           success: res.ok,
           message: res.ok
             ? `Sinkronisasi selesai!\n• ${json.synced ?? 0} log baru\n• ${json.users_synced ?? 0} Pejuang disinkronkan`
-            : `Gagal: ${json.error}`,
+            : `Gagal: ${json.error || `server merespons ${res.status}. Coba lagi beberapa saat.`}`,
         });
       }
-      
+
       if (res.ok && (json.synced > 0 || !silent)) {
         fetchLogs(true);
       }
     } catch (e) {
       if (!silent) setSyncModal({ open: true, success: false, message: "Koneksi ke server gagal." });
     } finally {
-      isSyncingRef.current = false;
-      if (!silent) setIsSyncing(false);
+      if (silent) {
+        autoSyncRef.current = false;
+      } else {
+        manualSyncRef.current = false;
+        setIsSyncing(false);
+      }
     }
   }
 

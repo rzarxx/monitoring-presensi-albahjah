@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import net from 'net';
+import { isDeviceBusy } from '@/lib/zkteco';
 import { getUserSession } from '@/lib/auth';
 import { findDevice, parseDeviceId } from '@/lib/devices';
 
@@ -9,7 +10,8 @@ export async function POST(request, context) {
   const { id } = await context.params;
   const device = await findDevice(parseDeviceId(id));
   if (!device) return NextResponse.json({ error: 'Mesin tidak ditemukan.' }, { status: 404 });
-  const online = await new Promise((resolve) => {
+  // Membuka koneksi saat sinkronisasi berjalan akan memutus sesi sinkronisasi.
+  const online = isDeviceBusy(device) || await new Promise((resolve) => {
     const socket = new net.Socket();
     socket.setTimeout(3000);
     socket.once('connect', () => { socket.destroy(); resolve(true); });
