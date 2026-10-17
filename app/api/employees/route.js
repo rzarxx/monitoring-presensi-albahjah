@@ -49,7 +49,9 @@ export async function GET(request) {
     const devicesByUid = new Map();
     for (const row of presence) {
       const list = devicesByUid.get(row.uid) || [];
-      if (!list.some((item) => item.id === row.device_id)) list.push({ id: row.device_id, name: row.device_name });
+      // machine_name dipakai halaman Pejuang untuk menandai UID yang sama dipakai
+      // orang berbeda di mesin lain (data Pejuang dicocokkan hanya lewat nomor UID).
+      if (!list.some((item) => item.id === row.device_id)) list.push({ id: row.device_id, name: row.device_name, machine_name: row.display_name });
       devicesByUid.set(row.uid, list);
     }
 
