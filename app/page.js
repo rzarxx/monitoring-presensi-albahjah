@@ -6,6 +6,14 @@ import Modal from "@/app/components/Modal";
 import AttendanceChart from "@/app/components/AttendanceChart";
 import DeviceSelect, { useSelectedDevice } from "@/app/components/DeviceSelect";
 
+// "2026-10-17 10:25:59" -> "17/10/2026 10:25"
+function formatScanTime(value) {
+  if (!value) return "belum ada";
+  const [date, time = ""] = value.split(" ");
+  const [year, month, day] = date.split("-");
+  return `${day}/${month}/${year} ${time.slice(0, 5)}`;
+}
+
 export default function Home() {
   const [timeStr, setTimeStr] = useState("00:00:00 WIB");
   const [logs, setLogs] = useState([]);
@@ -168,8 +176,9 @@ export default function Home() {
           open: true,
           success: res.ok,
           message: res.ok
-            ? `Sinkronisasi selesai!\n• ${json.synced ?? 0} log baru\n• ${json.users_synced ?? 0} Pejuang disinkronkan`
+            ? `${json.message || "Sinkronisasi selesai!"}\n• ${json.synced ?? 0} log baru\n• ${json.users_synced ?? 0} user mesin disinkronkan`
             : `Gagal: ${json.error || `server merespons ${res.status}. Coba lagi beberapa saat.`}`,
+          diagnostics: res.ok ? json.diagnostics || null : null,
         });
       }
 
@@ -582,13 +591,40 @@ export default function Home() {
       </div>
 
       {/* Sync Result Modal */}
-      <Modal isOpen={syncModal.open} onClose={() => setSyncModal({ open: false, message: "", success: null })} title={syncModal.success ? "Sinkronisasi Berhasil" : "Sinkronisasi Gagal"} size="sm">
+      <Modal isOpen={syncModal.open} onClose={() => setSyncModal({ open: false, message: "", success: null })} title={!syncModal.success ? "Sinkronisasi Gagal" : syncModal.diagnostics?.warnings?.length ? "Sinkronisasi Selesai dengan Peringatan" : "Sinkronisasi Berhasil"} size="sm">
         <div style={{ background: syncModal.success ? "rgba(5,150,105,0.06)" : "rgba(239,68,68,0.06)", borderRadius: "10px", padding: "16px", marginBottom: "20px", display: "flex", gap: "12px", alignItems: "flex-start" }}>
           <span className="material-symbols-outlined" style={{ color: syncModal.success ? "var(--color-primary)" : "var(--color-error)", fontVariationSettings: "'FILL' 1", flexShrink: 0 }}>
             {syncModal.success ? "check_circle" : "error"}
           </span>
           <p style={{ margin: 0, fontSize: "13px", color: "var(--color-on-background)", whiteSpace: "pre-line", lineHeight: 1.7 }}>{syncModal.message}</p>
         </div>
+        {syncModal.diagnostics && (
+          <div style={{ border: "1px solid var(--color-outline-variant)", borderRadius: "10px", padding: "12px 16px", marginBottom: "16px", fontSize: "13px", lineHeight: 1.8 }}>
+            {[
+              ["Log di mesin", syncModal.diagnostics.machine_log_count === null
+                ? `tidak diketahui (terbaca ${syncModal.diagnostics.read_log_count})`
+                : `${syncModal.diagnostics.machine_log_count} (terbaca ${syncModal.diagnostics.read_log_count})`],
+              ["Log di database", syncModal.diagnostics.database_log_count],
+              ["Scan terakhir di mesin", formatScanTime(syncModal.diagnostics.latest_machine_log)],
+              ["Scan terakhir di database", formatScanTime(syncModal.diagnostics.latest_database_log)],
+            ].map(([label, value]) => (
+              <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                <span style={{ color: "var(--color-outline)" }}>{label}</span>
+                <span style={{ fontWeight: 600, color: "var(--color-on-background)", fontFamily: "'JetBrains Mono', monospace", textAlign: "right" }}>{value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {syncModal.diagnostics?.warnings?.length > 0 && (
+          <div role="alert" style={{ background: "rgba(234,179,8,0.12)", border: "1px solid rgba(202,138,4,0.4)", borderRadius: "10px", padding: "12px 16px", marginBottom: "20px", fontSize: "13px", color: "var(--color-on-background)", lineHeight: 1.6 }}>
+            {syncModal.diagnostics.warnings.map((warning) => (
+              <div key={warning} style={{ display: "flex", gap: "8px" }}>
+                <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "#ca8a04", flexShrink: 0 }}>warning</span>
+                {warning}
+              </div>
+            ))}
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button onClick={() => setSyncModal({ open: false, message: "", success: null })}
             style={{ padding: "10px 20px", background: "var(--color-primary)", color: "var(--color-surface)", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>
