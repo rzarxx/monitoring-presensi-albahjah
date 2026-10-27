@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
+import { emitRealtimeEvent } from '@/lib/events';
 
 const codePattern = /^[A-Z0-9_-]{2,50}$/;
 
@@ -24,6 +25,7 @@ export async function POST(request) {
     const name = String(body.name || '').trim();
     if (!codePattern.test(code) || !name) return NextResponse.json({ error: 'Kode segment dan nama wajib diisi.' }, { status: 422 });
     const result = await query(`INSERT INTO segments (code, name) VALUES (?, ?)`, [code, name]);
+    emitRealtimeEvent('devices', { action: 'segment_create', segment_id: result.insertId });
     return NextResponse.json({ id: result.insertId, message: 'Segment ditambahkan.' }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: error.code === 'ER_DUP_ENTRY' ? 'Kode segment sudah digunakan.' : 'Gagal menambah segment.' }, { status: 500 });

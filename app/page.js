@@ -5,6 +5,7 @@ import DashboardShell from "@/app/components/DashboardShell";
 import Modal from "@/app/components/Modal";
 import AttendanceChart from "@/app/components/AttendanceChart";
 import DeviceSelect, { useSelectedDevice } from "@/app/components/DeviceSelect";
+import { useRealtimeStream } from "@/app/components/useRealtimeStream";
 
 // "2026-10-17 10:25:59" -> "17/10/2026 10:25"
 function formatScanTime(value) {
@@ -119,7 +120,7 @@ export default function Home() {
     } catch (e) { console.error(e); }
   }, [selectedDeviceId]);
 
-  // Auto-sync & Real-time setup
+  // Auto-sync & Real-time SSE setup (0 delay)
   const autoSyncRef = useRef(false);
   const manualSyncRef = useRef(false);
 
@@ -130,22 +131,31 @@ export default function Home() {
     fetchLogs();
     fetchMachineStatus();
     fetchChartData();
-    
-    // Poll status jaringan tiap 15 detik
-    const statusIv = setInterval(fetchMachineStatus, 15000);
-    let syncIv;
-    if (canSync) {
-      // Auto sync hanya untuk peran yang berwenang.
-      handleSync(false, true);
-      syncIv = setInterval(() => handleSync(false, true), 60000);
-    }
+  }, [fetchLogs, fetchMachineStatus, fetchChartData, selectedDeviceId]);
 
-    return () => {
-      clearInterval(statusIv);
-      if (syncIv) clearInterval(syncIv);
-    };
+  useEffect(() => {
+    if (!selectedDeviceId || !canSync) return;
+    // Tarik data awal sekali saat halaman dibuka atau berpindah mesin
+    handleSync(false, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchLogs, fetchMachineStatus, fetchChartData, selectedDeviceId, canSync]);
+  }, [selectedDeviceId, canSync]);
+
+  // Dengarkan perubahan real-time via Server-Sent Events (SSE) tanpa delay
+  useRealtimeStream((event) => {
+    if (!selectedDeviceId) return;
+    if (event.type === "machine_status") {
+      if (!event.device_id || String(event.device_id) === String(selectedDeviceId)) {
+        setMachineStatus((prev) => ({ ...prev, online: Boolean(event.online) }));
+      }
+      return;
+    }
+    if (["attendance", "sync", "employees", "leaves"].includes(event.type)) {
+      if (!event.device_id || String(event.device_id) === String(selectedDeviceId)) {
+        fetchLogs(true);
+        fetchChartData();
+      }
+    }
+  });
 
   // Manual & Silent sync. Auto-sync dilewati bila ada sinkronisasi lain, tetapi klik
   // manual selalu dikirim: server menggabungkannya dengan sinkronisasi yang sedang berjalan.
@@ -182,8 +192,9 @@ export default function Home() {
         });
       }
 
-      if (res.ok && (json.synced > 0 || !silent)) {
+      if (res.ok) {
         fetchLogs(true);
+        fetchChartData();
       }
     } catch (e) {
       if (!silent) setSyncModal({ open: true, success: false, message: "Koneksi ke server gagal." });
@@ -241,10 +252,10 @@ export default function Home() {
             </div>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            {canSync && <span style={{ fontSize: "12px", color: "var(--color-primary)", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px", background: "var(--color-surface-container-high)", padding: "6px 12px", borderRadius: "20px" }}>
+            <span style={{ fontSize: "12px", color: "var(--color-primary)", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px", background: "var(--color-surface-container-high)", padding: "6px 12px", borderRadius: "20px" }}>
               <span className="status-pulse" style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--color-primary)" }} />
-              Realtime Auto-Sync Aktif
-            </span>}
+              Realtime Live-Stream Aktif
+            </span>
             {canSync && <>
             <button onClick={() => handleSync(true)} disabled={isSyncing} aria-busy={isSyncing}
               style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 16px", background: "var(--color-surface-variant)", border: "1px solid #c3c6d6", borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "var(--color-primary)", cursor: isSyncing ? "wait" : "pointer", opacity: isSyncing ? 0.72 : 1, transition: "opacity 0.2s" }}>

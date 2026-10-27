@@ -3,12 +3,10 @@ import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
 import { parseDeviceId } from '@/lib/devices';
 import { allocateEmployeeUids, setEnrollmentLink } from '@/lib/enrollments';
+import { emitRealtimeEvent } from '@/lib/events';
 
 const MAX_ITEMS = 500;
 
-// Mendaftarkan banyak user mesin sebagai Pejuang sekaligus dan langsung
-// menghubungkannya. Nomor Pejuang memakai UID mesin bila belum dipakai,
-// selain itu nomor bebas berikutnya (UID mesin lain bisa milik orang lain).
 export async function POST(request) {
   try {
     const user = await getUserSession(request);
@@ -43,6 +41,8 @@ export async function POST(request) {
     for (const [index, entry] of entries.entries()) {
       await setEnrollmentLink(entry.deviceId, entry.deviceUid, uids[index]);
     }
+
+    emitRealtimeEvent('employees', { action: 'bulk_create', inserted: entries.length });
 
     const renumbered = entries.filter((entry, index) => uids[index] !== entry.deviceUid).length;
     return NextResponse.json({

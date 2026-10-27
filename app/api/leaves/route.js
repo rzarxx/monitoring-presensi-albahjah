@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
 import { requireDevice } from '@/lib/devices';
+import { emitRealtimeEvent } from '@/lib/events';
 
 const leaveTypes = new Set(['Izin', 'Sakit', 'Cuti']);
 
@@ -54,6 +55,8 @@ export async function POST(request) {
       await query(`INSERT INTO leaves (device_id, uid, date, type, reason) VALUES (?, ?, ?, ?, ?)`, [device.id, uid, date, type, reason]);
     }
 
+    emitRealtimeEvent('leaves', { action: 'save', device_id: device.id, uid, date, type });
+
     return NextResponse.json({ success: true, message: 'Izin/Cuti berhasil disimpan.' });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -62,7 +65,6 @@ export async function POST(request) {
 
 export async function DELETE(request) {
   try {
-    // Hanya superadmin yang bisa menghapus data izin
     const user = await getUserSession(request);
     if (!user || user.role !== 'superadmin') {
       return NextResponse.json({ error: 'Akses ditolak. Hanya superadmin yang dapat menghapus data.' }, { status: 403 });
@@ -77,6 +79,7 @@ export async function DELETE(request) {
     }
 
     await query(`DELETE FROM leaves WHERE id = ? AND device_id = ?`, [id, device.id]);
+    emitRealtimeEvent('leaves', { action: 'delete', device_id: device.id, id: Number(id) });
     return NextResponse.json({ success: true, message: 'Data berhasil dihapus.' });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

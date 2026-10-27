@@ -4,6 +4,8 @@ import { getZkData, runDeviceJob } from '@/lib/zkteco';
 import { getUserSession } from '@/lib/auth';
 import { findDevice, parseDeviceId } from '@/lib/devices';
 import { autoLinkEnrollments, ensureEnrollments } from '@/lib/enrollments';
+import { emitRealtimeEvent } from '@/lib/events';
+import { refreshRealtimeDevices } from '@/lib/realtime-monitor';
 
 const pad = (value) => String(value).padStart(2, '0');
 const formatLocal = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
@@ -17,8 +19,6 @@ function latestRecordTime(logs) {
   return latest;
 }
 
-// Membandingkan apa yang dilaporkan mesin, yang terbaca, dan yang tersimpan,
-// supaya pembacaan yang tidak lengkap terlihat di hasil sinkronisasi.
 async function buildDiagnostics(device, { logs, machine, partial }) {
   const [row] = await query(`SELECT COUNT(*) AS total, MAX(timestamp) AS latest FROM attendance_logs WHERE device_id = ?`, [device.id]);
   const latestMachine = latestRecordTime(logs);
@@ -46,13 +46,19 @@ async function syncDevice(device, full) {
   const { users } = pulled;
   const logs = pulled.logs || [];
 
+  // Bulk upsert seluruh user mesin dalam batch (jauh lebih cepat dibanding loop satu per satu)
+  const enrollmentRows = [];
   for (const machineUser of users || []) {
     const uid = Number.parseInt(machineUser.userId, 10);
     if (!Number.isInteger(uid)) continue;
+    enrollmentRows.push([device.id, uid, String(machineUser.name || '').trim()]);
+  }
+  for (let index = 0; index < enrollmentRows.length; index += 1000) {
+    const batch = enrollmentRows.slice(index, index + 1000);
     await query(
-      `INSERT INTO device_enrollments (device_id, device_uid, display_name) VALUES (?, ?, ?)
+      `INSERT INTO device_enrollments (device_id, device_uid, display_name) VALUES ?
        ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)`,
-      [device.id, uid, String(machineUser.name || '').trim()]
+      [batch]
     );
   }
 
@@ -77,10 +83,15 @@ async function syncDevice(device, full) {
     totalInserted += result.affectedRows || 0;
   }
 
-  // Setiap UID yang scan butuh baris pemetaan (juga user yang sudah dihapus dari
-  // mesin), lalu yang nomor dan namanya cocok dengan Pejuang dihubungkan otomatis.
   await ensureEnrollments(device.id, values.map((value) => value[1]));
   await autoLinkEnrollments(device.id);
+
+  // Pancarkan event real-time ke seluruh tab browser yang sedang aktif
+  emitRealtimeEvent('sync', {
+    device_id: device.id,
+    synced: totalInserted,
+    users_synced: users?.length || 0,
+  });
 
   return {
     message: logs.length ? 'Sinkronisasi berhasil.' : 'Tidak ada data absensi dari mesin.',
@@ -103,10 +114,15 @@ export async function POST(request) {
     if (!device) return NextResponse.json({ error: 'Mesin tidak ditemukan atau tidak aktif.' }, { status: 404 });
 
     const full = body.full === true;
-    // Sinkronisasi yang sedang berjalan untuk mesin yang sama dipakai bersama;
-    // sinkronisasi penuh hanya boleh menumpang pada sinkronisasi penuh lain.
-    const result = await runDeviceJob(device, full ? 'full' : 'incremental', () => syncDevice(device, full),
-      (runningMode) => runningMode === 'full' || !full);
+    const result = await runDeviceJob(
+      device,
+      full ? 'full' : 'incremental',
+      () => syncDevice(device, full),
+      (runningMode) => runningMode === 'full' || !full
+    ).finally(() => {
+      // Sambungkan kembali real-time listener begitu pekerjaan sinkronisasi selesai
+      refreshRealtimeDevices().catch(() => {});
+    });
 
     return NextResponse.json({ ...result, device: { id: device.id, code: device.code, name: device.name } });
   } catch (error) {

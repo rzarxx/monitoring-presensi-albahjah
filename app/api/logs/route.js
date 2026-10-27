@@ -27,25 +27,46 @@ export async function GET(request) {
     const orderColumn = sortableColumns[searchParams.get('sortCol')] || sortableColumns.date;
     const orderDirection = String(searchParams.get('sortDir') || 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
     const department = user.role === 'manager' && user.department ? user.department : null;
-    // Profil Pejuang memfilter lewat pemetaan, bukan nomor UID mesin.
     const employeeUid = Number.parseInt(searchParams.get('employee_uid') || '', 10);
 
-    const conditions = ['a.device_id = ?'];
-    const params = [device.id];
-    if (date) { conditions.push('DATE(a.timestamp) = ?'); params.push(date); }
-    else conditions.push('DATE(a.timestamp) = CURDATE()');
-    if (department) { conditions.push('e.department = ?'); params.push(department); }
-    if (search) { conditions.push('(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)'); params.push(`%${search}%`, `%${search}%`, search); }
-    if (Number.isInteger(employeeUid)) { conditions.push('de.employee_uid = ?'); params.push(employeeUid); }
-    const where = `WHERE ${conditions.join(' AND ')}`;
+    // 1. Kondisi untuk attendance_logs
+    const attConditions = ['a.device_id = ?'];
+    const attParams = [device.id];
+    if (date) { attConditions.push('DATE(a.timestamp) = ?'); attParams.push(date); }
+    else attConditions.push('DATE(a.timestamp) = CURDATE()');
+    if (department) { attConditions.push('e.department = ?'); attParams.push(department); }
+    if (search) {
+      attConditions.push('(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)');
+      attParams.push(`%${search}%`, `%${search}%`, search);
+    }
+    if (Number.isInteger(employeeUid)) { attConditions.push('de.employee_uid = ?'); attParams.push(employeeUid); }
+    const attWhere = `WHERE ${attConditions.join(' AND ')}`;
 
+    // 2. Kondisi untuk leaves (izin/sakit/cuti yang belum ada scan kehadiran di hari tersebut)
+    const leaveConditions = ['l.device_id = ?'];
+    const leaveParams = [device.id];
+    if (date) { leaveConditions.push('l.date = ?'); leaveParams.push(date); }
+    else leaveConditions.push('l.date = CURDATE()');
+    if (department) { leaveConditions.push('e.department = ?'); leaveParams.push(department); }
+    if (search) {
+      leaveConditions.push('(e.name LIKE ? OR CAST(l.uid AS CHAR) = ? OR l.type LIKE ?)');
+      leaveParams.push(`%${search}%`, search, `%${search}%`);
+    }
+    if (Number.isInteger(employeeUid)) { leaveConditions.push('l.uid = ?'); leaveParams.push(employeeUid); }
+    const leaveWhere = `WHERE ${leaveConditions.join(' AND ')}`;
+
+    // Raw logs untuk panel "Aktivitas Terkini"
     const rawConditions = ['a.device_id = ?'];
     const rawParams = [device.id];
     if (department) { rawConditions.push('e.department = ?'); rawParams.push(department); }
-    if (search) { rawConditions.push('(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)'); rawParams.push(`%${search}%`, `%${search}%`, search); }
+    if (search) {
+      rawConditions.push('(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)');
+      rawParams.push(`%${search}%`, `%${search}%`, search);
+    }
     if (Number.isInteger(employeeUid)) { rawConditions.push('de.employee_uid = ?'); rawParams.push(employeeUid); }
     const rawLogs = await query(`
-      SELECT a.id, a.uid AS device_uid, a.timestamp, a.state, COALESCE(e.name, de.display_name, CONCAT('UID_', a.uid)) AS name, e.department
+      SELECT a.id, a.uid AS device_uid, a.timestamp, a.state,
+             COALESCE(e.name, de.display_name) AS name, e.department
       FROM attendance_logs a
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
       LEFT JOIN employees e ON e.uid = de.employee_uid
@@ -53,30 +74,57 @@ export async function GET(request) {
       ORDER BY a.timestamp DESC LIMIT 100
     `, rawParams);
 
-    const report = await query(`
-      SELECT DATE(a.timestamp) AS date, a.uid AS device_uid,
-             COALESCE(e.name, de.display_name, CONCAT('UID_', a.uid)) AS name,
+    const combinedSubquery = `
+      SELECT DATE(a.timestamp) AS date,
+             a.uid AS device_uid,
+             COALESCE(e.name, de.display_name) AS name,
              COALESCE(e.department, '') AS department,
-             MIN(a.timestamp) AS check_in, MAX(a.timestamp) AS check_out,
-             COUNT(a.id) AS scan_count, NULL AS leave_type
+             MIN(a.timestamp) AS check_in,
+             MAX(a.timestamp) AS check_out,
+             COUNT(a.id) AS scan_count,
+             MAX(l.type) AS leave_type,
+             MAX(l.reason) AS leave_reason
       FROM attendance_logs a
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
       LEFT JOIN employees e ON e.uid = de.employee_uid
-      ${where}
+      LEFT JOIN leaves l ON l.device_id = a.device_id AND l.uid = COALESCE(e.uid, a.uid) AND l.date = DATE(a.timestamp)
+      ${attWhere}
       GROUP BY DATE(a.timestamp), a.uid, e.name, de.display_name, e.department
+
+      UNION ALL
+
+      SELECT l.date AS date,
+             l.uid AS device_uid,
+             COALESCE(e.name, CONCAT('UID_', l.uid)) AS name,
+             COALESCE(e.department, '') AS department,
+             NULL AS check_in,
+             NULL AS check_out,
+             0 AS scan_count,
+             l.type AS leave_type,
+             l.reason AS leave_reason
+      FROM leaves l
+      LEFT JOIN employees e ON e.uid = l.uid
+      ${leaveWhere}
+      AND NOT EXISTS (
+        SELECT 1 FROM attendance_logs a2
+        LEFT JOIN device_enrollments de2 ON de2.device_id = a2.device_id AND de2.device_uid = a2.uid
+        WHERE a2.device_id = l.device_id
+          AND DATE(a2.timestamp) = l.date
+          AND COALESCE(de2.employee_uid, a2.uid) = l.uid
+      )
+    `;
+
+    const unionParams = [...attParams, ...leaveParams];
+
+    const report = await query(`
+      SELECT * FROM (${combinedSubquery}) AS combined_report
       ORDER BY ${orderColumn} ${orderDirection}, name ASC
       LIMIT ? OFFSET ?
-    `, [...params, limit, offset]);
+    `, [...unionParams, limit, offset]);
 
     const [{ count }] = await query(`
-      SELECT COUNT(*) AS count FROM (
-        SELECT DATE(a.timestamp), a.uid FROM attendance_logs a
-        LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
-        LEFT JOIN employees e ON e.uid = de.employee_uid
-        ${where}
-        GROUP BY DATE(a.timestamp), a.uid
-      ) grouped
-    `, params);
+      SELECT COUNT(*) AS count FROM (${combinedSubquery}) AS grouped
+    `, unionParams);
 
     const [metrics] = await query(`
       SELECT COUNT(*) AS totalScansToday,

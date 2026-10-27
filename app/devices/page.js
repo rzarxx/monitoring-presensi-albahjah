@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import DashboardShell from '@/app/components/DashboardShell';
 import Modal from '@/app/components/Modal';
+import { useRealtimeStream } from '@/app/components/useRealtimeStream';
 
 const emptyDevice = { name: '', model: 'X105', segment_id: '', host: '', port: '4370' };
 const inputStyle = { width: '100%', minHeight: '44px', padding: '10px 12px', border: '1px solid var(--color-outline-variant)', borderRadius: '8px', background: 'var(--color-surface)', color: 'var(--color-on-background)' };
@@ -19,6 +20,9 @@ export default function DevicesPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load().catch(() => setMessage({ type: 'error', text: 'Gagal memuat konfigurasi mesin.' }));
   }, []);
+  useRealtimeStream((event) => {
+    if (event.type === 'devices') load().catch(() => {});
+  });
   const notifyError = (error, fallback) => setMessage({ type: 'error', text: error.message || fallback });
   const openDeviceForm = (device = null) => { setEditingDevice(device); setDeviceForm(device ? { name: device.name, model: device.model, segment_id: device.segment_id ? String(device.segment_id) : '', host: device.host || '', port: String(device.port || 4370) } : emptyDevice); setDeviceOpen(true); };
   const saveDevice = async (event) => { event.preventDefault(); setSaving(true); try { const response = await fetch(editingDevice ? `/api/devices/${editingDevice.id}` : '/api/devices', { method: editingDevice ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(deviceForm) }); const json = await response.json(); if (!response.ok) throw new Error(json.error); setDeviceOpen(false); setEditingDevice(null); setMessage({ type: 'success', text: json.message }); await load(); } catch (error) { notifyError(error, 'Gagal menyimpan mesin.'); } finally { setSaving(false); } };

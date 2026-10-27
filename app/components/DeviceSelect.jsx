@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRealtimeStream } from "@/app/components/useRealtimeStream";
 
 const STORAGE_KEY = "selectedDeviceId";
 export const ALL_DEVICES = "all";
@@ -19,9 +20,6 @@ function storeDevice(value) {
   } catch {}
 }
 
-// Pilihan mesin dipakai bersama oleh Dasbor, Pejuang, dan profil Pejuang, dan
-// bertahan antar-tab. Halaman tanpa mode "Semua mesin" memakai mesin pertama
-// bila pilihan tersimpan adalah "all" atau mesin yang sudah nonaktif.
 export function useSelectedDevice({ allowAll = false } = {}) {
   const [devices, setDevices] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -33,20 +31,27 @@ export function useSelectedDevice({ allowAll = false } = {}) {
     return list[0] ? String(list[0].id) : "";
   }, [allowAll]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const reloadDevices = useCallback(() => {
     fetch("/api/devices")
       .then((response) => (response.ok ? response.json() : { data: [] }))
       .catch(() => ({ data: [] }))
       .then((json) => {
-        if (cancelled) return;
         const list = json.data || [];
         setDevices(list);
-        setDeviceIdState(resolve(list, readStoredDevice()));
+        setDeviceIdState((prev) => resolve(list, prev || readStoredDevice()));
         setLoaded(true);
       });
-    return () => { cancelled = true; };
   }, [resolve]);
+
+  useEffect(() => {
+    reloadDevices();
+  }, [reloadDevices]);
+
+  useRealtimeStream((event) => {
+    if (event.type === "devices") {
+      reloadDevices();
+    }
+  });
 
   useEffect(() => {
     const onStorage = (event) => {
@@ -62,7 +67,7 @@ export function useSelectedDevice({ allowAll = false } = {}) {
   }, []);
 
   const device = devices.find((item) => String(item.id) === deviceId) || null;
-  return { devices, deviceId, setDeviceId, device, isAll: deviceId === ALL_DEVICES, loaded };
+  return { devices, deviceId, setDeviceId, device, isAll: deviceId === ALL_DEVICES, loaded, reloadDevices };
 }
 
 export function deviceLabel(device) {

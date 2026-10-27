@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
 import { listDevices } from '@/lib/devices';
+import { emitRealtimeEvent } from '@/lib/events';
+import { refreshRealtimeDevices } from '@/lib/realtime-monitor';
 
 const models = new Set(['X105', 'X103', 'OTHER']);
 
@@ -29,12 +31,13 @@ export async function POST(request) {
     if (!name || !host || !Number.isInteger(port) || port < 1 || port > 65535) {
       return NextResponse.json({ error: 'Nama lokasi fingerprint, IP/host, dan port wajib valid.' }, { status: 422 });
     }
-    // Kode dipakai sistem sebagai ID internal dan tidak perlu diisi operator.
     const code = `LOC-${randomUUID().toUpperCase()}`;
     const result = await query(
       `INSERT INTO devices (segment_id, code, name, model, host, port) VALUES (?, ?, ?, ?, ?, ?)`,
       [segmentId, code, name, model, host, port]
     );
+    refreshRealtimeDevices().catch(() => {});
+    emitRealtimeEvent('devices', { action: 'create', device_id: result.insertId });
     return NextResponse.json({ id: result.insertId, message: 'Mesin ditambahkan.' }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: 'Gagal menambah mesin.' }, { status: 500 });

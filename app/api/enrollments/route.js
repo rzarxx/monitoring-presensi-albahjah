@@ -3,10 +3,8 @@ import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
 import { parseDeviceId } from '@/lib/devices';
 import { setEnrollmentLink } from '@/lib/enrollments';
+import { emitRealtimeEvent } from '@/lib/events';
 
-// Menghubungkan user mesin ke Pejuang (employee_uid berisi nomor Pejuang) atau
-// melepasnya (employee_uid null). Keputusan ini dikunci agar tidak diubah oleh
-// penghubungan otomatis saat sinkronisasi.
 export async function PUT(request) {
   try {
     const user = await getUserSession(request);
@@ -29,6 +27,14 @@ export async function PUT(request) {
     if (!(await setEnrollmentLink(deviceId, deviceUid, employeeUid))) {
       return NextResponse.json({ error: 'User mesin tidak ditemukan. Sinkronkan mesin terlebih dahulu.' }, { status: 404 });
     }
+
+    emitRealtimeEvent('employees', {
+      action: employeeUid === null ? 'unlink' : 'link',
+      device_id: deviceId,
+      device_uid: deviceUid,
+      employee_uid: employeeUid,
+    });
+
     return NextResponse.json({ message: employeeUid === null ? 'User mesin dilepas dari Pejuang.' : 'User mesin dihubungkan ke Pejuang.' });
   } catch (error) {
     console.error('[API/enrollments]', error);

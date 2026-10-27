@@ -6,6 +6,7 @@ import DeviceSelect, { deviceLabel, useSelectedDevice } from "@/app/components/D
 import Modal from "@/app/components/Modal";
 import Link from "next/link";
 import { sameName } from "@/lib/names";
+import { useRealtimeStream } from "@/app/components/useRealtimeStream";
 
 const todayLocal = () => new Date().toLocaleDateString("en-CA");
 const emptyLeave = { open: false, employee: null, deviceId: "", type: 'Izin', date: todayLocal(), reason: '' };
@@ -140,9 +141,14 @@ export default function Employees() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchEmployees();
     fetchMetrics();
-    const iv = setInterval(fetchMetrics, 30000);
-    return () => clearInterval(iv);
   }, [fetchEmployees, fetchMetrics]);
+
+  useRealtimeStream((event) => {
+    if (["employees", "attendance", "sync", "leaves", "devices"].includes(event.type)) {
+      fetchEmployees();
+      fetchMetrics();
+    }
+  });
 
   const refreshAll = () => {
     fetchEmployees();
@@ -260,7 +266,10 @@ export default function Employees() {
       const res = await fetch("/api/employees", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          device_id: !isAll && deviceId ? Number(deviceId) : null,
+        }),
       });
       if (!res.ok) throw new Error(await readError(res, "Gagal menyimpan data"));
       showNotif("Pejuang berhasil ditambahkan!", "success");
@@ -286,7 +295,7 @@ export default function Employees() {
       if (!res.ok) throw new Error(await readError(res, "Gagal memperbarui data"));
       showNotif("Data Pejuang berhasil diperbarui!", "success");
       setEditModal({ open: false, employee: null });
-      fetchEmployees();
+      refreshAll();
     } catch (err) {
       showNotif(err.message || "Gagal memperbarui data", "error");
     } finally {
@@ -300,7 +309,7 @@ export default function Employees() {
       const res = await fetch(`/api/employees/${deleteModal.employee.uid}`, { method: "DELETE" });
       if (res.ok) {
         setDeleteModal({ open: false, employee: null });
-        fetchEmployees();
+        refreshAll();
         showNotif("Pejuang berhasil dihapus.");
       } else {
         showNotif("Gagal menghapus Pejuang.", "error");
@@ -330,6 +339,7 @@ export default function Employees() {
       });
       if (res.ok) {
         setLeaveModal(emptyLeave);
+        refreshAll();
         showNotif("Data Izin/Cuti berhasil disimpan!");
       } else {
         const json = await res.json();
