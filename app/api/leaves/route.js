@@ -4,7 +4,7 @@ import { getUserSession } from '@/lib/auth';
 import { requireDevice } from '@/lib/devices';
 import { emitRealtimeEvent } from '@/lib/events';
 
-const leaveTypes = new Set(['Izin', 'Sakit', 'Cuti']);
+const leaveTypes = new Set(['Izin', 'Sakit', 'Cuti', 'Alfa']);
 
 export async function GET(request) {
   try {
@@ -40,7 +40,7 @@ export async function POST(request) {
     const type = String(body.type || '');
     const reason = String(body.reason || '').trim();
     if (!Number.isInteger(uid) || uid < 1 || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !leaveTypes.has(type) || reason.length > 1000) {
-      return NextResponse.json({ error: 'Data izin/cuti tidak valid.' }, { status: 422 });
+      return NextResponse.json({ error: 'Data keterangan ketidakhadiran tidak valid.' }, { status: 422 });
     }
 
     const emp = await query(`SELECT * FROM employees WHERE uid = ?`, [uid]);
@@ -57,7 +57,7 @@ export async function POST(request) {
 
     emitRealtimeEvent('leaves', { action: 'save', device_id: device.id, uid, date, type });
 
-    return NextResponse.json({ success: true, message: 'Izin/Cuti berhasil disimpan.' });
+    return NextResponse.json({ success: true, message: 'Keterangan ketidakhadiran berhasil disimpan.' });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

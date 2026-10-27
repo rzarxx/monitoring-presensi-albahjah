@@ -15,6 +15,17 @@ function formatScanTime(value) {
   return `${day}/${month}/${year} ${time.slice(0, 5)}`;
 }
 
+function todayInJakarta() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 export default function Home() {
   const [timeStr, setTimeStr] = useState("00:00:00 WIB");
   const [logs, setLogs] = useState([]);
@@ -25,13 +36,19 @@ export default function Home() {
   const [filterSearch, setFilterSearch] = useState("");
   const [sortConfig, setSortConfig] = useState({ col: 'date', dir: 'desc' });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const [missingAttendance, setMissingAttendance] = useState([]);
+  const [attendanceStatusModal, setAttendanceStatusModal] = useState({ open: false, employee: null, type: "Izin", reason: "", error: "" });
+  const [isSavingAttendanceStatus, setIsSavingAttendanceStatus] = useState(false);
   const [syncModal, setSyncModal] = useState({ open: false, message: "", success: null });
   const [exportModal, setExportModal] = useState({ open: false, dateFrom: "", dateTo: "", department: "", format: "excel" });
   const [welcomeModal, setWelcomeModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [machineStatus, setMachineStatus] = useState({ online: true, ip: "Memeriksa..." });
   const [chartData, setChartData] = useState([]);
+  const [chartError, setChartError] = useState("");
   const { devices, deviceId: selectedDeviceId, setDeviceId: setSelectedDeviceId } = useSelectedDevice();
   const [canSync, setCanSync] = useState(false);
 
@@ -78,20 +95,25 @@ export default function Home() {
       params.append("sortCol", sortConfig.col);
       params.append("sortDir", sortConfig.dir);
       params.append("page", page.toString());
+      params.append("limit", pageSize.toString());
       params.append("device_id", selectedDeviceId);
       const res = await fetch("/api/logs?" + params.toString());
       if (!res.ok) return;
       const json = await res.json();
       if (json.data)    setLogs(json.data);
       if (json.report)  setReport(json.report);
+      setMissingAttendance(json.missingAttendance || []);
       if (json.metrics) setMetrics(json.metrics);
-      if (json.pagination) setTotalPages(json.pagination.totalPages || 1);
+      if (json.pagination) {
+        setTotalPages(json.pagination.totalPages || 1);
+        setTotalItems(json.pagination.totalItems || 0);
+      }
     } catch (e) { 
       console.error(e); 
     } finally {
       if (!isSilent) setIsLoading(false);
     }
-  }, [filterDate, filterSearch, sortConfig, page, selectedDeviceId]);
+  }, [filterDate, filterSearch, sortConfig, page, pageSize, selectedDeviceId]);
 
   // Fetch machine status
   const fetchMachineStatus = useCallback(async () => {
@@ -112,12 +134,16 @@ export default function Home() {
   const fetchChartData = useCallback(async () => {
     if (!selectedDeviceId) return;
     try {
+      setChartError("");
       const res = await fetch(`/api/stats?device_id=${selectedDeviceId}`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.data) setChartData(json.data);
-      }
-    } catch (e) { console.error(e); }
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Statistik gagal dimuat.");
+      setChartData(json.data || []);
+    } catch (e) {
+      console.error(e);
+      setChartData([]);
+      setChartError(e.message || "Statistik gagal dimuat.");
+    }
   }, [selectedDeviceId]);
 
   // Auto-sync & Real-time SSE setup (0 delay)
@@ -207,6 +233,44 @@ export default function Home() {
       }
     }
   }
+
+  const openAttendanceStatusModal = (employee) => {
+    setAttendanceStatusModal({
+      open: true,
+      employee,
+      type: employee.status_type || "Izin",
+      reason: employee.status_reason || "",
+      error: "",
+    });
+  };
+
+  const saveAttendanceStatus = async (event) => {
+    event.preventDefault();
+    if (!selectedDeviceId || !attendanceStatusModal.employee) return;
+    setIsSavingAttendanceStatus(true);
+    setAttendanceStatusModal((current) => ({ ...current, error: "" }));
+    try {
+      const res = await fetch(`/api/leaves?device_id=${encodeURIComponent(selectedDeviceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid: attendanceStatusModal.employee.uid,
+          date: filterDate || todayInJakarta(),
+          type: attendanceStatusModal.type,
+          reason: attendanceStatusModal.reason,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Keterangan gagal disimpan.");
+      setAttendanceStatusModal({ open: false, employee: null, type: "Izin", reason: "", error: "" });
+      await fetchLogs(true);
+      await fetchChartData();
+    } catch (error) {
+      setAttendanceStatusModal((current) => ({ ...current, error: error.message || "Keterangan gagal disimpan." }));
+    } finally {
+      setIsSavingAttendanceStatus(false);
+    }
+  };
 
   // Excel / PDF download
   const handleExportSubmit = async (e) => {
@@ -414,11 +478,75 @@ export default function Home() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
               <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Statistik Harian (7 Hari Terakhir)</h2>
-              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-outline)" }}>Ringkasan kehadiran, cuti, izin, dan sakit Pejuang.</p>
+              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-outline)" }}>Ringkasan kehadiran, cuti, izin, sakit, dan alfa Pejuang.</p>
             </div>
             <span className="material-symbols-outlined" style={{ fontSize: "24px", color: "var(--color-outline-variant)" }}>bar_chart</span>
           </div>
-          <AttendanceChart data={chartData} />
+          {chartError ? (
+            <div role="alert" style={{ minHeight: "220px", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-error)", fontSize: "13px", textAlign: "center" }}>
+              {chartError}
+            </div>
+          ) : (
+            <AttendanceChart data={chartData} />
+          )}
+        </div>
+
+        <div className="glass-card" style={{ borderRadius: "16px", padding: "24px", marginBottom: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Pejuang Belum Tap Finger</h2>
+              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-outline)" }}>
+                {filterDate ? `Tanggal ${new Date(`${filterDate}T00:00:00`).toLocaleDateString("id-ID")}` : "Hari ini"} · {missingAttendance.length} Pejuang belum tercatat hadir.
+              </p>
+            </div>
+            <span style={{ minWidth: "32px", height: "32px", padding: "0 10px", borderRadius: "16px", display: "inline-flex", alignItems: "center", justifyContent: "center", background: missingAttendance.length ? "var(--color-error-container)" : "rgba(5,150,105,0.1)", color: missingAttendance.length ? "var(--color-error)" : "var(--color-primary)", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>
+              {missingAttendance.length}
+            </span>
+          </div>
+
+          {missingAttendance.length === 0 ? (
+            <div style={{ padding: "24px", textAlign: "center", color: "var(--color-outline)", fontSize: "13px", background: "var(--color-background)", borderRadius: "10px" }}>
+              Semua Pejuang yang terpetakan pada mesin ini sudah melakukan tap finger.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid #e4efff" }}>
+                    {["Nama Pejuang", "Departemen", "Keterangan", "Catatan", ...(canSync ? ["Aksi"] : [])].map((label) => (
+                      <th key={label} style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontFamily: "'JetBrains Mono', monospace", color: "var(--color-outline)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>{label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {missingAttendance.map((employee) => (
+                    <tr key={employee.uid} style={{ borderBottom: "1px solid #eef4ff" }}>
+                      <td style={{ padding: "12px 14px", fontSize: "14px", fontWeight: 600, color: "var(--color-on-background)" }}>{employee.name}</td>
+                      <td style={{ padding: "12px 14px", fontSize: "13px", color: "var(--color-outline)" }}>{employee.department || "—"}</td>
+                      <td style={{ padding: "12px 14px" }}>
+                        {employee.status_type ? (
+                          <span style={{ display: "inline-flex", padding: "4px 10px", borderRadius: "6px", background: employee.status_type === "Alfa" ? "var(--color-error-container)" : "rgba(234,179,8,0.12)", color: employee.status_type === "Alfa" ? "var(--color-error)" : "#a16207", fontSize: "12px", fontWeight: 700 }}>
+                            {employee.status_type}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--color-outline)", fontSize: "12px", fontStyle: "italic" }}>Belum diberi keterangan</span>
+                        )}
+                      </td>
+                      <td style={{ padding: "12px 14px", maxWidth: "320px", overflow: "hidden", textOverflow: "ellipsis", color: "var(--color-outline)", fontSize: "13px" }} title={employee.status_reason || ""}>{employee.status_reason || "—"}</td>
+                      {canSync && (
+                        <td style={{ padding: "12px 14px" }}>
+                          <button type="button" onClick={() => openAttendanceStatusModal(employee)}
+                            style={{ padding: "7px 12px", border: "1px solid var(--color-primary)", borderRadius: "8px", background: "transparent", color: "var(--color-primary)", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
+                            {employee.status_type ? "Ubah" : "Beri Keterangan"}
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* ── Tabel Riwayat ─────────────────────────────────────────────── */}
@@ -428,15 +556,22 @@ export default function Home() {
             <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Riwayat Kehadiran</h2>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               {/* Filter tanggal */}
-              <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)}
+              <input type="date" value={filterDate} onChange={(e) => { setFilterDate(e.target.value); setPage(1); }}
                 style={{ padding: "8px 12px", border: "1px solid #c3c6d6", borderRadius: "8px", fontSize: "13px", color: "var(--color-on-background)", background: "var(--color-surface-variant)", outline: "none", cursor: "pointer" }} />
               {/* Search */}
               <div style={{ position: "relative" }}>
                 <span className="material-symbols-outlined" style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", fontSize: "16px", color: "var(--color-outline)" }}>search</span>
                 <input type="text" placeholder="Cari nama atau UID..." value={filterSearch}
-                  onChange={(e) => setFilterSearch(e.target.value)}
+                  onChange={(e) => { setFilterSearch(e.target.value); setPage(1); }}
                   style={{ padding: "8px 12px 8px 34px", border: "1px solid #c3c6d6", borderRadius: "8px", fontSize: "13px", color: "var(--color-on-background)", background: "var(--color-surface-variant)", outline: "none", width: "200px" }} />
               </div>
+              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--color-outline)" }}>
+                Baris
+                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} aria-label="Jumlah baris riwayat per halaman"
+                  style={{ padding: "8px 10px", border: "1px solid #c3c6d6", borderRadius: "8px", fontSize: "13px", color: "var(--color-on-background)", background: "var(--color-surface-variant)" }}>
+                  {[5, 10, 15, 20].map((size) => <option key={size} value={size}>{size}</option>)}
+                </select>
+              </label>
               {/* Reset filter */}
               {(filterDate || filterSearch) && (
                 <button onClick={() => { setFilterDate(""); setFilterSearch(""); setPage(1); }}
@@ -470,6 +605,7 @@ export default function Home() {
                     <th key={h.key} 
                         onClick={() => {
                           if (h.key === 'durasi') return; // Cannot sort by durasi easily in SQL here
+                          setPage(1);
                           setSortConfig(s => ({
                             col: h.key,
                             dir: s.col === h.key && s.dir === 'asc' ? 'desc' : 'asc'
@@ -573,10 +709,10 @@ export default function Home() {
           </div>
           
           {/* Pagination Controls */}
-          {totalPages > 1 && (
+          {totalItems > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "20px", borderTop: "1px solid var(--color-surface-variant)", paddingTop: "16px" }}>
               <span style={{ fontSize: "13px", color: "var(--color-outline)", fontWeight: 500 }}>
-                Menampilkan Halaman {page} dari {totalPages}
+                Menampilkan {Math.min((page - 1) * pageSize + 1, totalItems)}–{Math.min(page * pageSize, totalItems)} dari {totalItems} data
               </span>
               <div style={{ display: "flex", gap: "8px" }}>
                 <button 
@@ -600,6 +736,50 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      <Modal
+        isOpen={attendanceStatusModal.open}
+        onClose={() => setAttendanceStatusModal({ open: false, employee: null, type: "Izin", reason: "", error: "" })}
+        title="Keterangan Belum Tap Finger"
+        size="sm"
+      >
+        {attendanceStatusModal.employee && (
+          <form onSubmit={saveAttendanceStatus} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ padding: "12px", borderRadius: "8px", background: "var(--color-background)" }}>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--color-on-background)" }}>{attendanceStatusModal.employee.name}</div>
+              <div style={{ marginTop: "3px", fontSize: "12px", color: "var(--color-outline)" }}>
+                {attendanceStatusModal.employee.department || "Tanpa departemen"} · {filterDate || "Hari ini"}
+              </div>
+            </div>
+            <div>
+              <label htmlFor="attendance-status-type" style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: 600, color: "var(--color-outline)" }}>Keterangan</label>
+              <select id="attendance-status-type" required value={attendanceStatusModal.type}
+                onChange={(event) => setAttendanceStatusModal((current) => ({ ...current, type: event.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", border: "1px solid #c3c6d6", borderRadius: "8px", color: "var(--color-on-background)", background: "var(--color-surface)" }}>
+                <option value="Izin">Izin</option>
+                <option value="Sakit">Sakit</option>
+                <option value="Alfa">Alfa</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="attendance-status-reason" style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: 600, color: "var(--color-outline)" }}>Catatan (opsional)</label>
+              <textarea id="attendance-status-reason" rows={3} maxLength={1000} value={attendanceStatusModal.reason}
+                onChange={(event) => setAttendanceStatusModal((current) => ({ ...current, reason: event.target.value }))}
+                placeholder="Contoh: Surat dokter menyusul"
+                style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #c3c6d6", borderRadius: "8px", resize: "vertical", color: "var(--color-on-background)", background: "var(--color-surface)" }} />
+            </div>
+            {attendanceStatusModal.error && <p role="alert" style={{ margin: 0, color: "var(--color-error)", fontSize: "13px" }}>{attendanceStatusModal.error}</p>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+              <button type="button" onClick={() => setAttendanceStatusModal({ open: false, employee: null, type: "Izin", reason: "", error: "" })}
+                style={{ padding: "9px 16px", border: "1px solid #c3c6d6", borderRadius: "8px", background: "var(--color-surface)", color: "var(--color-on-background)", cursor: "pointer" }}>Batal</button>
+              <button type="submit" disabled={isSavingAttendanceStatus}
+                style={{ padding: "9px 16px", border: "none", borderRadius: "8px", background: "var(--color-primary)", color: "var(--color-surface)", fontWeight: 600, cursor: isSavingAttendanceStatus ? "wait" : "pointer", opacity: isSavingAttendanceStatus ? 0.7 : 1 }}>
+                {isSavingAttendanceStatus ? "Menyimpan..." : "Simpan"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
 
       {/* Sync Result Modal */}
       <Modal isOpen={syncModal.open} onClose={() => setSyncModal({ open: false, message: "", success: null })} title={!syncModal.success ? "Sinkronisasi Gagal" : syncModal.diagnostics?.warnings?.length ? "Sinkronisasi Selesai dengan Peringatan" : "Sinkronisasi Berhasil"} size="sm">
