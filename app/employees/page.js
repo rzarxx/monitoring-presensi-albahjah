@@ -340,7 +340,7 @@ export default function Employees() {
       if (res.ok) {
         setLeaveModal(emptyLeave);
         refreshAll();
-        showNotif("Data Izin/Cuti berhasil disimpan!");
+        showNotif("Keterangan ketidakhadiran berhasil disimpan!");
       } else {
         const json = await res.json();
         showNotif(json.error || "Gagal menyimpan data izin.", "error");
@@ -620,7 +620,7 @@ export default function Employees() {
                           }}
                           onMouseEnter={e => { e.currentTarget.style.background = "#fef08a"; }}
                           onMouseLeave={e => { e.currentTarget.style.background = "#fefce8"; }}
-                          title="Input Izin/Sakit/Cuti"
+                          title="Input Izin/Sakit/Cuti/Alfa"
                         >
                           <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "#ca8a04" }}>event_note</span>
                         </button>
@@ -823,7 +823,7 @@ export default function Employees() {
       </Modal>
 
       {/* ── Input Leave Modal ────────────────────────────────────────────── */}
-      <Modal isOpen={leaveModal.open} onClose={() => setLeaveModal({ ...leaveModal, open: false })} title="Input Izin/Sakit/Cuti" size="sm">
+      <Modal isOpen={leaveModal.open} onClose={() => setLeaveModal({ ...leaveModal, open: false })} title="Input Keterangan Ketidakhadiran" size="sm">
         {leaveModal.employee && (
           <form onSubmit={handleLeaveSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px", background: "var(--color-surface-container)", borderRadius: "10px" }}>
@@ -861,6 +861,7 @@ export default function Employees() {
                   <option value="Izin">Izin</option>
                   <option value="Sakit">Sakit</option>
                   <option value="Cuti">Cuti</option>
+                  <option value="Alfa">Alfa</option>
                 </select>
               </div>
             </div>

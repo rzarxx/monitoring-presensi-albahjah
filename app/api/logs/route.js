@@ -82,12 +82,11 @@ export async function GET(request) {
              MIN(a.timestamp) AS check_in,
              MAX(a.timestamp) AS check_out,
              COUNT(a.id) AS scan_count,
-             MAX(l.type) AS leave_type,
-             MAX(l.reason) AS leave_reason
+             NULL AS leave_type,
+             NULL AS leave_reason
       FROM attendance_logs a
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
       LEFT JOIN employees e ON e.uid = de.employee_uid
-      LEFT JOIN leaves l ON l.device_id = a.device_id AND l.uid = COALESCE(e.uid, a.uid) AND l.date = DATE(a.timestamp)
       ${attWhere}
       GROUP BY DATE(a.timestamp), a.uid, e.name, de.display_name, e.department
 
@@ -136,10 +135,37 @@ export async function GET(request) {
       WHERE a.device_id = ? AND DATE(a.timestamp) = CURDATE()
     `, [device.id]);
 
+    const missingDepartment = department ? 'AND e.department = ?' : '';
+    const missingParams = [date || null, date || null, device.id];
+    if (department) missingParams.push(department);
+    const missingAttendance = await query(`
+      SELECT e.uid, e.name, COALESCE(e.department, '') AS department,
+             MAX(l.id) AS status_id,
+             MAX(l.type) AS status_type,
+             MAX(l.reason) AS status_reason
+      FROM device_enrollments de
+      JOIN employees e ON e.uid = de.employee_uid
+      LEFT JOIN leaves l
+        ON l.device_id = de.device_id
+       AND l.uid = e.uid
+       AND l.date = COALESCE(?, CURDATE())
+      LEFT JOIN attendance_logs a2
+        ON a2.device_id = de.device_id
+       AND a2.uid = de.device_uid
+       AND DATE(a2.timestamp) = COALESCE(?, CURDATE())
+      WHERE de.device_id = ?
+        AND de.employee_uid IS NOT NULL
+        ${missingDepartment}
+      GROUP BY e.uid, e.name, e.department
+      HAVING COUNT(a2.id) = 0
+      ORDER BY e.name ASC
+    `, missingParams);
+
     return NextResponse.json({
       device: { id: device.id, code: device.code, name: device.name, segment: device.segment_name },
       data: rawLogs,
       report,
+      missingAttendance,
       pagination: { page, totalPages: Math.max(1, Math.ceil(Number(count) / limit)), totalItems: Number(count) },
       metrics: {
         totalScansToday: Number(metrics.totalScansToday || 0),

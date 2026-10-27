@@ -20,11 +20,12 @@ export default function AttendanceChart({ data }) {
       Izin: item.izin,
       Sakit: item.sakit,
       Cuti: item.cuti,
+      Alfa: item.alfa,
       dateLabel: date && !Number.isNaN(date.getTime())
         ? date.toLocaleDateString("id-ID", { day: "2-digit", month: "short" })
         : "—",
     };
-  }).reverse(); // reverse so oldest is left, newest right
+  });
 
   return (
     <div style={{ width: "100%", height: "300px", marginTop: "16px" }}>
@@ -41,7 +42,8 @@ export default function AttendanceChart({ data }) {
           <Bar dataKey="Hadir" stackId="a" fill="var(--color-primary)" radius={[0, 0, 4, 4]} barSize={30} />
           <Bar dataKey="Izin" stackId="a" fill="#eab308" />
           <Bar dataKey="Sakit" stackId="a" fill="#3b82f6" />
-          <Bar dataKey="Cuti" stackId="a" fill="#a855f7" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="Cuti" stackId="a" fill="#a855f7" />
+          <Bar dataKey="Alfa" stackId="a" fill="var(--color-error)" radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
