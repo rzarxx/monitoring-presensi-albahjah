@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
+import { emitRealtimeEvent } from '@/lib/events';
 
 export async function PUT(request, { params }) {
   try {
@@ -21,6 +22,7 @@ export async function PUT(request, { params }) {
       `UPDATE employees SET name = ?, department = ? WHERE uid = ?`,
       [name, department, uid]
     );
+    emitRealtimeEvent('employees', { action: 'update', uid });
     return NextResponse.json({ message: 'Employee updated successfully' });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -42,9 +44,8 @@ export async function DELETE(request, { params }) {
     }
 
     await query(`DELETE FROM employees WHERE uid = ?`, [uid]);
-    // User mesinnya kembali ke daftar "belum terdaftar"; nomor Pejuang yang sama
-    // bisa dipakai orang lain nanti, jadi pemetaan lama tidak boleh tertinggal.
     await query(`UPDATE device_enrollments SET employee_uid = NULL, link_locked = 0 WHERE employee_uid = ?`, [uid]);
+    emitRealtimeEvent('employees', { action: 'delete', uid });
     return NextResponse.json({ message: 'Employee deleted' });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

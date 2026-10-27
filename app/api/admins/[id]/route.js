@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
 import { hashPassword, isValidPassword } from '@/lib/password';
+import { emitRealtimeEvent } from '@/lib/events';
 
 export async function PUT(request, { params }) {
   try {
@@ -43,6 +44,7 @@ export async function PUT(request, { params }) {
       );
     }
 
+    emitRealtimeEvent('admins', { action: 'update', id: Number(id) });
     return NextResponse.json({ message: 'Admin berhasil diperbarui' });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -63,7 +65,6 @@ export async function DELETE(request, { params }) {
       return NextResponse.json({ error: 'ID admin tidak valid' }, { status: 400 });
     }
 
-    // Pastikan tidak menghapus admin terakhir
     const totalAdmins = await query(`SELECT COUNT(*) as count FROM admins`);
     if (totalAdmins[0].count <= 1) {
       return NextResponse.json({ error: 'Tidak dapat menghapus admin terakhir' }, { status: 400 });
@@ -75,6 +76,7 @@ export async function DELETE(request, { params }) {
       return NextResponse.json({ error: 'Admin tidak ditemukan' }, { status: 404 });
     }
 
+    emitRealtimeEvent('admins', { action: 'delete', id: Number(id) });
     return NextResponse.json({ message: 'Admin berhasil dihapus' });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

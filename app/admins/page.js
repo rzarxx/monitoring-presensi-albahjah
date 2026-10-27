@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import DashboardShell from "@/app/components/DashboardShell";
 import Modal from "@/app/components/Modal";
+import { useRealtimeStream } from "@/app/components/useRealtimeStream";
 
 export default function Admins() {
   const [admins, setAdmins] = useState([]);
@@ -17,6 +18,12 @@ export default function Admins() {
   useEffect(() => {
     fetchAdmins();
   }, []);
+
+  useRealtimeStream((event) => {
+    if (event.type === "admins") {
+      fetchAdmins();
+    }
+  });
 
   async function fetchAdmins() {
     setLoading(true);

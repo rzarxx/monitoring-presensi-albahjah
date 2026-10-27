@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import DashboardShell from "@/app/components/DashboardShell";
 import AttendanceChart from "@/app/components/AttendanceChart";
 import DeviceSelect, { useSelectedDevice } from "@/app/components/DeviceSelect";
+import { useRealtimeStream } from "@/app/components/useRealtimeStream";
 import { useParams } from "next/navigation";
 
 export default function EmployeeProfile() {
@@ -55,6 +56,12 @@ export default function EmployeeProfile() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   }, [fetchData]);
+
+  useRealtimeStream((event) => {
+    if (["employees", "attendance", "sync", "leaves", "devices"].includes(event.type)) {
+      fetchData();
+    }
+  });
 
   return (
     <DashboardShell>

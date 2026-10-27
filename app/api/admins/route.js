@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
 import { hashPassword, isValidPassword } from '@/lib/password';
+import { emitRealtimeEvent } from '@/lib/events';
 
-// GET - Hanya superadmin yang bisa melihat daftar akun
 export async function GET(request) {
   try {
     const user = await getUserSession(request);
@@ -17,7 +17,6 @@ export async function GET(request) {
   }
 }
 
-// POST - Hanya superadmin yang bisa membuat akun baru, password otomatis di-hash
 export async function POST(request) {
   try {
     const user = await getUserSession(request);
@@ -31,7 +30,6 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Username wajib diisi dan password minimal 12 karakter.' }, { status: 422 });
     }
 
-    // Validasi role yang diperbolehkan
     const allowedRoles = ['admin', 'superadmin', 'sdm', 'manager'];
     const finalRole = allowedRoles.includes(role) ? role : 'admin';
     
@@ -47,6 +45,7 @@ export async function POST(request) {
       [username, hashedPassword, finalRole, department || '']
     );
 
+    emitRealtimeEvent('admins', { action: 'create', id: result.insertId });
     return NextResponse.json({ message: 'Akun berhasil ditambahkan.', id: result.insertId });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
