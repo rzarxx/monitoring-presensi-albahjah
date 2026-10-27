@@ -15,7 +15,17 @@ export async function proxy(request) {
   if (pathname.startsWith('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
     const origin = request.headers.get('origin');
     const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL ? new URL(process.env.NEXT_PUBLIC_APP_URL).origin : null;
-    if (!origin || (origin !== request.nextUrl.origin && origin !== configuredOrigin)) {
+    const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('host');
+    const forwardedProto = request.headers.get('x-forwarded-proto') || 'https';
+    const forwardedOrigin = forwardedHost ? `${forwardedProto.split(',')[0].trim()}://${forwardedHost.split(',')[0].trim()}` : null;
+    if (
+      !origin ||
+      (origin !== request.nextUrl.origin &&
+        origin !== configuredOrigin &&
+        origin !== forwardedOrigin &&
+        `https://${forwardedHost}` !== origin &&
+        `http://${forwardedHost}` !== origin)
+    ) {
       return NextResponse.json({ error: 'Permintaan lintas-domain ditolak.' }, { status: 403 });
     }
   }
