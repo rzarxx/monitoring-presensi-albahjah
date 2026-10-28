@@ -77,6 +77,7 @@ export async function GET(request) {
     const combinedSubquery = `
       SELECT DATE(a.timestamp) AS date,
              a.uid AS device_uid,
+             de.employee_uid AS employee_uid,
              COALESCE(e.name, de.display_name) AS name,
              COALESCE(e.department, '') AS department,
              MIN(a.timestamp) AS check_in,
@@ -94,6 +95,7 @@ export async function GET(request) {
 
       SELECT l.date AS date,
              l.uid AS device_uid,
+             l.uid AS employee_uid,
              COALESCE(e.name, CONCAT('UID_', l.uid)) AS name,
              COALESCE(e.department, '') AS department,
              NULL AS check_in,

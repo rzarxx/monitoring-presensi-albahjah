@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import DashboardShell from "@/app/components/DashboardShell";
 import Modal from "@/app/components/Modal";
 import AttendanceChart from "@/app/components/AttendanceChart";
@@ -136,7 +137,7 @@ export default function Home() {
     if (!selectedDeviceId) return;
     try {
       setChartError("");
-      const res = await fetch(`/api/stats?device_id=${selectedDeviceId}`);
+      const res = await fetch(`/api/stats?device_id=${selectedDeviceId}`, { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || "Statistik gagal dimuat.");
       setChartData(json.data || []);
@@ -167,45 +168,27 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canSync]);
 
-  useEffect(() => {
-    if (!syncJobId) return;
-    let cancelled = false;
-    let timer;
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/sync?job_id=${encodeURIComponent(syncJobId)}`);
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok || cancelled) return;
-        const job = json.job;
-        if (job.status === "running") {
-          timer = window.setTimeout(poll, 1500);
-          return;
-        }
-        setIsSyncing(false);
-        setSyncJobId("");
-        fetchLogs(true);
-        fetchChartData();
-        if (syncModal.open) {
-          setSyncModal({
-            open: true,
-            success: job.failed === 0,
-            message: job.failed === 0
-              ? `Sinkronisasi selesai. ${job.succeeded}/${job.total} mesin berhasil diperbarui.`
-              : `Sinkronisasi selesai dengan kendala. ${job.succeeded}/${job.total} mesin berhasil, ${job.failed} mesin gagal.`,
-            diagnostics: null,
-          });
-        }
-      } catch {
-        if (!cancelled) timer = window.setTimeout(poll, 3000);
-      }
-    };
-    poll();
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [syncJobId, fetchLogs, fetchChartData, syncModal.open]);
-
   // Dengarkan perubahan real-time via Server-Sent Events (SSE) tanpa delay
   useRealtimeStream((event) => {
     if (!selectedDeviceId) return;
+    if (event.type === "sync_job" && event.job?.id === syncJobId) {
+      const job = event.job;
+      setIsSyncing(false);
+      setSyncJobId("");
+      fetchLogs(true);
+      fetchChartData();
+      if (syncModal.open) {
+        setSyncModal({
+          open: true,
+          success: job.failed === 0,
+          message: job.failed === 0
+            ? `Sinkronisasi selesai. ${job.succeeded}/${job.total} mesin berhasil diperbarui.`
+            : `Sinkronisasi selesai dengan kendala. ${job.succeeded}/${job.total} mesin berhasil, ${job.failed} mesin gagal.`,
+          diagnostics: null,
+        });
+      }
+      return;
+    }
     if (event.type === "machine_status") {
       if (!event.device_id || String(event.device_id) === String(selectedDeviceId)) {
         setMachineStatus((prev) => ({ ...prev, online: Boolean(event.online) }));
@@ -543,7 +526,7 @@ export default function Home() {
                 <tbody>
                   {missingAttendance.map((employee) => (
                     <tr key={employee.uid} style={{ borderBottom: "1px solid #eef4ff" }}>
-                      <td style={{ padding: "12px 14px", fontSize: "14px", fontWeight: 600, color: "var(--color-on-background)" }}>{employee.name}</td>
+                      <td style={{ padding: "12px 14px", fontSize: "14px", fontWeight: 600 }}><Link href={`/employees/${employee.uid}`} style={{ color: "var(--color-on-background)", textDecoration: "none" }}>{employee.name}</Link></td>
                       <td style={{ padding: "12px 14px", fontSize: "13px", color: "var(--color-outline)" }}>{employee.department || "—"}</td>
                       <td style={{ padding: "12px 14px" }}>
                         {employee.status_type ? (
@@ -685,7 +668,9 @@ export default function Home() {
                       <td style={{ padding: "12px 14px", fontSize: "13px", color: "var(--color-outline)" }}>{dateStr}</td>
                       <td style={{ padding: "12px 14px" }}>
                         {item.name
-                          ? <span style={{ fontWeight: 600, color: "var(--color-on-background)", fontSize: "14px" }}>{item.name}</span>
+                          ? item.employee_uid
+                            ? <Link href={`/employees/${item.employee_uid}`} style={{ fontWeight: 600, color: "var(--color-on-background)", fontSize: "14px", textDecoration: "none" }}>{item.name}</Link>
+                            : <span style={{ fontWeight: 600, color: "var(--color-on-background)", fontSize: "14px" }}>{item.name}</span>
                           : <span style={{ color: "var(--color-error)", fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" }}>UID: {item.device_uid}</span>
                         }
                       </td>
