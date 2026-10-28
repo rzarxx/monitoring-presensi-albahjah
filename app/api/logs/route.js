@@ -20,6 +20,8 @@ export async function GET(request) {
     const searchParams = new URL(request.url).searchParams;
     const device = await requireDevice(searchParams);
     const date = searchParams.get('date');
+    const dateFrom = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.get('date_from') || '') ? searchParams.get('date_from') : null;
+    const dateTo = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.get('date_to') || '') ? searchParams.get('date_to') : null;
     const search = searchParams.get('search');
     const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('limit') || '5', 10)));
@@ -33,6 +35,7 @@ export async function GET(request) {
     const attConditions = ['a.device_id = ?'];
     const attParams = [device.id];
     if (date) { attConditions.push('DATE(a.timestamp) = ?'); attParams.push(date); }
+    else if (dateFrom && dateTo) { attConditions.push('DATE(a.timestamp) BETWEEN ? AND ?'); attParams.push(dateFrom, dateTo); }
     else attConditions.push('DATE(a.timestamp) = CURDATE()');
     if (department) { attConditions.push('e.department = ?'); attParams.push(department); }
     if (search) {
@@ -46,6 +49,7 @@ export async function GET(request) {
     const leaveConditions = ['l.device_id = ?'];
     const leaveParams = [device.id];
     if (date) { leaveConditions.push('l.date = ?'); leaveParams.push(date); }
+    else if (dateFrom && dateTo) { leaveConditions.push('l.date BETWEEN ? AND ?'); leaveParams.push(dateFrom, dateTo); }
     else leaveConditions.push('l.date = CURDATE()');
     if (department) { leaveConditions.push('e.department = ?'); leaveParams.push(department); }
     if (search) {
@@ -58,6 +62,8 @@ export async function GET(request) {
     // Raw logs untuk panel "Aktivitas Terkini"
     const rawConditions = ['a.device_id = ?'];
     const rawParams = [device.id];
+    if (date) { rawConditions.push('DATE(a.timestamp) = ?'); rawParams.push(date); }
+    else if (dateFrom && dateTo) { rawConditions.push('DATE(a.timestamp) BETWEEN ? AND ?'); rawParams.push(dateFrom, dateTo); }
     if (department) { rawConditions.push('e.department = ?'); rawParams.push(department); }
     if (search) {
       rawConditions.push('(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)');
