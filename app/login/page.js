@@ -31,7 +31,13 @@ export default function LoginPage() {
         return;
       }
 
-      // Mulai sinkronisasi data di latar belakang — pengguna tidak perlu menunggu
+      // Mulai sinkronisasi semua mesin di latar belakang setelah cookie sesi diterima.
+      // Pengguna tetap langsung masuk, sementara dashboard akan menerima data terbaru.
+      void fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true }),
+      }).catch(() => {});
 
       sessionStorage.setItem("showWelcome", "true");
       router.push("/");
