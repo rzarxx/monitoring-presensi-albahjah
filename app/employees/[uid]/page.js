@@ -24,7 +24,8 @@ export default function EmployeeProfile() {
   const [canManageAttendance, setCanManageAttendance] = useState(false);
   const [absenceModal, setAbsenceModal] = useState({ open: false, type: "Izin", date: todayInJakarta(), reason: "", error: "" });
   const [isSavingAbsence, setIsSavingAbsence] = useState(false);
-  const [recap, setRecap] = useState({ loading: false, period: "weekly", data: null, error: "" });
+  const [period, setPeriod] = useState("weekly");
+  const [recap, setRecap] = useState({ loading: false, data: null, error: "" });
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -45,41 +46,12 @@ export default function EmployeeProfile() {
         setEmployee(found || { uid, name: "Tidak Ditemukan", department: "-", devices: [] });
       }
 
-      // 2. Get 7-Day Stats for this user
-      const statsRes = deviceId
-        ? await fetch(`/api/stats?employee_uid=${encodeURIComponent(uid)}&device_id=${encodeURIComponent(deviceId)}`, { cache: "no-store" })
-        : null;
-      if (statsRes?.ok) {
-        const statsJson = await statsRes.json();
-        setChartData(statsJson.data || []);
-      }
-
-      // 3. Get Recent Logs for this user
-      const logsRes = deviceId
-        ? await fetch(`/api/logs?employee_uid=${encodeURIComponent(uid)}&limit=10&device_id=${encodeURIComponent(deviceId)}`)
-        : null;
-      if (logsRes?.ok) {
-        const logsJson = await logsRes.json();
-        setLogs(logsJson.data || []);
-      }
-
     } catch (e) {
       console.error(e);
     } finally {
       setIsLoading(false);
     }
   }, [uid, deviceId, devicesLoaded]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchData();
-  }, [fetchData]);
-
-  useRealtimeStream((event) => {
-    if (["employees", "attendance", "sync", "leaves", "devices"].includes(event.type)) {
-      fetchData();
-    }
-  });
 
   const saveAbsence = async (event) => {
     event.preventDefault();
@@ -103,18 +75,45 @@ export default function EmployeeProfile() {
     }
   };
 
-  const loadRecap = async (period) => {
+  const loadRecap = useCallback(async () => {
     if (!deviceId) return;
-    setRecap({ loading: true, period, data: null, error: "" });
+    setRecap({ loading: true, data: null, error: "" });
     try {
-      const res = await fetch(`/api/employees/${encodeURIComponent(uid)}/recap?device_id=${encodeURIComponent(deviceId)}&period=${period}`);
+      const res = await fetch(`/api/employees/${encodeURIComponent(uid)}/recap?device_id=${encodeURIComponent(deviceId)}&period=${period}`, { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || "Rekap gagal dimuat.");
-      setRecap({ loading: false, period, data: json, error: "" });
+      setChartData(json.daily.map((day) => ({
+        date: day.date,
+        hadir: day.status === "Hadir" ? 1 : 0,
+        izin: day.status === "Izin" ? 1 : 0,
+        sakit: day.status === "Sakit" ? 1 : 0,
+        cuti: day.status === "Cuti" ? 1 : 0,
+        alfa: day.status === "Alfa" ? 1 : 0,
+      })));
+      const logsRes = await fetch(`/api/logs?employee_uid=${encodeURIComponent(uid)}&device_id=${encodeURIComponent(deviceId)}&date_from=${json.range.from}&date_to=${json.range.to}&limit=100`, { cache: "no-store" });
+      const logsJson = await logsRes.json().catch(() => ({}));
+      if (!logsRes.ok) throw new Error(logsJson.error || "Riwayat periode gagal dimuat.");
+      setLogs(logsJson.data || []);
+      setRecap({ loading: false, data: json, error: "" });
     } catch (error) {
-      setRecap({ loading: false, period, data: null, error: error.message || "Rekap gagal dimuat." });
+      setChartData([]);
+      setLogs([]);
+      setRecap({ loading: false, data: null, error: error.message || "Rekap gagal dimuat." });
     }
-  };
+  }, [uid, deviceId, period]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchData();
+    loadRecap();
+  }, [fetchData, loadRecap]);
+
+  useRealtimeStream((event) => {
+    if (["employees", "attendance", "sync", "leaves", "devices"].includes(event.type)) {
+      fetchData();
+      loadRecap();
+    }
+  });
 
   return (
     <DashboardShell>
@@ -173,8 +172,6 @@ export default function EmployeeProfile() {
               </div>
               <div style={{ width: "100%", marginTop: "16px", display: "grid", gap: "8px" }}>
                 {canManageAttendance && <button type="button" onClick={() => setAbsenceModal((current) => ({ ...current, open: true }))} style={{ padding: "10px 12px", border: "1px solid var(--color-primary)", borderRadius: "8px", background: "transparent", color: "var(--color-primary)", fontWeight: 700, cursor: "pointer" }}>Beri Keterangan</button>}
-                <button type="button" onClick={() => loadRecap("weekly")} disabled={!deviceId || recap.loading} style={{ padding: "10px 12px", border: "none", borderRadius: "8px", background: "var(--color-primary)", color: "var(--color-on-primary)", fontWeight: 700, cursor: "pointer" }}>Rekap Mingguan</button>
-                <button type="button" onClick={() => loadRecap("monthly")} disabled={!deviceId || recap.loading} style={{ padding: "10px 12px", border: "1px solid var(--color-outline-variant)", borderRadius: "8px", background: "var(--color-surface)", color: "var(--color-on-background)", fontWeight: 700, cursor: "pointer" }}>Rekap Bulanan</button>
               </div>
             </div>
 
@@ -182,17 +179,19 @@ export default function EmployeeProfile() {
             <div className="glass-card" style={{ borderRadius: "16px", padding: "24px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Statistik Harian (7 Hari Terakhir)</h2>
+                  <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Statistik {period === "monthly" ? "Bulanan" : "Mingguan"}</h2>
                 </div>
-                <span className="material-symbols-outlined" style={{ fontSize: "24px", color: "var(--color-outline-variant)" }}>bar_chart</span>
+                <div style={{ display: "flex", gap: "8px" }}><button type="button" onClick={() => setPeriod("weekly")} disabled={recap.loading} style={{ padding: "7px 10px", border: "none", borderRadius: "7px", background: period === "weekly" ? "var(--color-primary)" : "var(--color-surface-container-high)", color: period === "weekly" ? "var(--color-on-primary)" : "var(--color-on-background)", cursor: "pointer" }}>Mingguan</button><button type="button" onClick={() => setPeriod("monthly")} disabled={recap.loading} style={{ padding: "7px 10px", border: "none", borderRadius: "7px", background: period === "monthly" ? "var(--color-primary)" : "var(--color-surface-container-high)", color: period === "monthly" ? "var(--color-on-primary)" : "var(--color-on-background)", cursor: "pointer" }}>Bulanan</button></div>
               </div>
               <AttendanceChart data={chartData} />
+              {recap.error && <p role="alert" style={{ color: "var(--color-error)", fontSize: "13px" }}>{recap.error}</p>}
+              {recap.data && <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "12px" }}>{Object.entries(recap.data.summary).map(([key, value]) => <span key={key} style={{ padding: "5px 9px", borderRadius: "12px", background: "var(--color-surface-container-high)", fontSize: "12px" }}>{key.replace("_", " ")}: <strong>{value}</strong></span>)}</div>}
             </div>
 
             {/* Riwayat Terakhir */}
             <div className="glass-card" style={{ borderRadius: "16px", padding: "24px", gridColumn: "1 / -1" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Riwayat Terakhir</h2>
+                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Riwayat {period === "monthly" ? "Bulanan" : "Mingguan"}</h2>
               </div>
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
@@ -221,17 +220,6 @@ export default function EmployeeProfile() {
                 </table>
               </div>
             </div>
-
-            {(recap.loading || recap.error || recap.data) && (
-              <div className="glass-card" style={{ borderRadius: "16px", padding: "24px", gridColumn: "1 / -1" }}>
-                <h2 style={{ margin: "0 0 8px", fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Rekap {recap.period === "monthly" ? "Bulanan" : "Mingguan"}</h2>
-                {recap.loading ? <p style={{ color: "var(--color-outline)" }}>Memuat rekap...</p> : recap.error ? <p style={{ color: "var(--color-error)" }}>{recap.error}</p> : recap.data && <>
-                  <p style={{ margin: "0 0 16px", color: "var(--color-outline)", fontSize: "13px" }}>{recap.data.range.from} s.d. {recap.data.range.to} · {recap.data.device.name}</p>
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "16px" }}>{Object.entries(recap.data.summary).map(([key, value]) => <span key={key} style={{ padding: "6px 10px", borderRadius: "14px", background: "var(--color-surface-container-high)", fontSize: "12px", color: "var(--color-on-background)" }}>{key.replace("_", " ")}: <strong>{value}</strong></span>)}</div>
-                  <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr><th style={{ textAlign: "left", padding: "8px" }}>Tanggal</th><th style={{ textAlign: "left", padding: "8px" }}>Status</th><th style={{ textAlign: "left", padding: "8px" }}>Pindaian</th><th style={{ textAlign: "left", padding: "8px" }}>Catatan</th></tr></thead><tbody>{recap.data.daily.map((day) => <tr key={day.date} style={{ borderTop: "1px solid var(--color-outline-variant)" }}><td style={{ padding: "8px" }}>{day.date}</td><td style={{ padding: "8px" }}>{day.status}</td><td style={{ padding: "8px" }}>{day.scan_count}</td><td style={{ padding: "8px" }}>{day.reason || "-"}</td></tr>)}</tbody></table></div>
-                </>}
-              </div>
-            )}
 
           </div>
         )}
