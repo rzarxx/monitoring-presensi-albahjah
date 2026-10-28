@@ -51,6 +51,7 @@ export default function Home() {
   const [chartError, setChartError] = useState("");
   const { devices, deviceId: selectedDeviceId, setDeviceId: setSelectedDeviceId } = useSelectedDevice();
   const [canSync, setCanSync] = useState(false);
+  const [syncJobId, setSyncJobId] = useState("");
 
   // Clock
   useEffect(() => {
@@ -160,11 +161,47 @@ export default function Home() {
   }, [fetchLogs, fetchMachineStatus, fetchChartData, selectedDeviceId]);
 
   useEffect(() => {
-    if (!selectedDeviceId || !canSync) return;
-    // Tarik data awal sekali saat halaman dibuka atau berpindah mesin
-    handleSync(false, true);
+    if (!canSync) return;
+    // Tarik data seluruh mesin sekali setelah sesi dashboard siap.
+    handleSync(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDeviceId, canSync]);
+  }, [canSync]);
+
+  useEffect(() => {
+    if (!syncJobId) return;
+    let cancelled = false;
+    let timer;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/sync?job_id=${encodeURIComponent(syncJobId)}`);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || cancelled) return;
+        const job = json.job;
+        if (job.status === "running") {
+          timer = window.setTimeout(poll, 1500);
+          return;
+        }
+        setIsSyncing(false);
+        setSyncJobId("");
+        fetchLogs(true);
+        fetchChartData();
+        if (syncModal.open) {
+          setSyncModal({
+            open: true,
+            success: job.failed === 0,
+            message: job.failed === 0
+              ? `Sinkronisasi selesai. ${job.succeeded}/${job.total} mesin berhasil diperbarui.`
+              : `Sinkronisasi selesai dengan kendala. ${job.succeeded}/${job.total} mesin berhasil, ${job.failed} mesin gagal.`,
+            diagnostics: null,
+          });
+        }
+      } catch {
+        if (!cancelled) timer = window.setTimeout(poll, 3000);
+      }
+    };
+    poll();
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [syncJobId, fetchLogs, fetchChartData, syncModal.open]);
 
   // Dengarkan perubahan real-time via Server-Sent Events (SSE) tanpa delay
   useRealtimeStream((event) => {
@@ -183,13 +220,9 @@ export default function Home() {
     }
   });
 
-  // Manual & Silent sync. Auto-sync dilewati bila ada sinkronisasi lain, tetapi klik
-  // manual selalu dikirim: server menggabungkannya dengan sinkronisasi yang sedang berjalan.
-  async function handleSync(full = false, silent = false) {
-    if (!selectedDeviceId) {
-      if (!silent) setSyncModal({ open: true, success: false, message: "Pilih mesin terlebih dahulu." });
-      return;
-    }
+  // Satu sinkronisasi master untuk semua mesin. Server mengembalikan 202 agar
+  // reverse proxy tidak menunggu pembacaan log ZKTeco yang berukuran besar.
+  async function handleSync(silent = false) {
     if (silent) {
       if (autoSyncRef.current || manualSyncRef.current || document.visibilityState !== "visible") return;
       autoSyncRef.current = true;
@@ -202,34 +235,28 @@ export default function Home() {
       const res = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ full, device_id: Number(selectedDeviceId) }),
+        body: JSON.stringify({ all: true }),
       });
-      // Gateway/proxy yang timeout mengembalikan HTML, bukan JSON.
       const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `Server merespons ${res.status}.`);
+      setSyncJobId(json.job?.id || "");
 
       if (!silent) {
         setSyncModal({
           open: true,
-          success: res.ok,
-          message: res.ok
-            ? `${json.message || "Sinkronisasi selesai!"}\n• ${json.synced ?? 0} log baru\n• ${json.users_synced ?? 0} user mesin disinkronkan`
-            : `Gagal: ${json.error || `server merespons ${res.status}. Coba lagi beberapa saat.`}`,
-          diagnostics: res.ok ? json.diagnostics || null : null,
+          success: true,
+          message: `${json.message || "Sinkronisasi dimulai."}\n${json.job?.completed || 0}/${json.job?.total || 0} mesin selesai diproses.`,
+          diagnostics: null,
         });
       }
-
-      if (res.ok) {
-        fetchLogs(true);
-        fetchChartData();
-      }
     } catch (e) {
-      if (!silent) setSyncModal({ open: true, success: false, message: "Koneksi ke server gagal." });
+      if (!silent) setSyncModal({ open: true, success: false, message: e.message || "Koneksi ke server gagal." });
+      setIsSyncing(false);
     } finally {
       if (silent) {
         autoSyncRef.current = false;
       } else {
         manualSyncRef.current = false;
-        setIsSyncing(false);
       }
     }
   }
@@ -302,7 +329,7 @@ export default function Home() {
 
   return (
     <DashboardShell metrics={metrics}>
-      <div className="dashboard-container">
+      <div className="dashboard-container" style={{ display: "flex", flexDirection: "column" }}>
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "16px", marginBottom: "24px" }}>
@@ -321,15 +348,10 @@ export default function Home() {
               Realtime Live-Stream Aktif
             </span>
             {canSync && <>
-            <button onClick={() => handleSync(true)} disabled={isSyncing} aria-busy={isSyncing}
-              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 16px", background: "var(--color-surface-variant)", border: "1px solid #c3c6d6", borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "var(--color-primary)", cursor: isSyncing ? "wait" : "pointer", opacity: isSyncing ? 0.72 : 1, transition: "opacity 0.2s" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: "16px", animation: isSyncing ? "spin 1s linear infinite" : "none" }}>{isSyncing ? "progress_activity" : "history"}</span>
-              {isSyncing ? "Sedang menyinkronkan..." : "Sinkronkan Semua Data"}
-            </button>
             <button onClick={() => handleSync(false)} disabled={isSyncing} aria-busy={isSyncing}
               style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 16px", background: "var(--color-primary)", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: 600, color: "var(--color-surface)", cursor: isSyncing ? "wait" : "pointer", opacity: isSyncing ? 0.78 : 1, transition: "opacity 0.2s", boxShadow: "0 2px 8px rgba(0,61,155,0.3)" }}>
               <span className="material-symbols-outlined" style={{ fontSize: "16px", animation: isSyncing ? "spin 1s linear infinite" : "none" }}>{isSyncing ? "progress_activity" : "sync"}</span>
-              {isSyncing ? "Sedang menyinkronkan..." : "Sinkronkan Data Terbaru"}
+              {isSyncing ? "Sedang menyinkronkan..." : "Sinkronkan Semua Mesin"}
             </button>
             </>}
           </div>
@@ -491,7 +513,7 @@ export default function Home() {
           )}
         </div>
 
-        <div className="glass-card" style={{ borderRadius: "16px", padding: "24px", marginBottom: "20px" }}>
+        <div className="glass-card" style={{ order: 2, borderRadius: "16px", padding: "24px", marginBottom: "20px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
             <div>
               <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Pejuang Belum Tap Finger</h2>
@@ -550,7 +572,7 @@ export default function Home() {
         </div>
 
         {/* ── Tabel Riwayat ─────────────────────────────────────────────── */}
-        <div className="glass-card" style={{ borderRadius: "16px", padding: "24px" }}>
+        <div className="glass-card" style={{ order: 1, borderRadius: "16px", padding: "24px" }}>
           {/* Toolbar */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "20px" }}>
             <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Riwayat Kehadiran</h2>

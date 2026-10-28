@@ -2,10 +2,14 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getZkData, runDeviceJob } from '@/lib/zkteco';
 import { getUserSession } from '@/lib/auth';
-import { findDevice, parseDeviceId } from '@/lib/devices';
+import { findDevice, listDevices, parseDeviceId } from '@/lib/devices';
 import { autoLinkEnrollments, ensureEnrollments } from '@/lib/enrollments';
 import { emitRealtimeEvent } from '@/lib/events';
 import { refreshRealtimeDevices } from '@/lib/realtime-monitor';
+import { getSyncJob, startMasterSync } from '@/lib/sync-jobs';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const pad = (value) => String(value).padStart(2, '0');
 const formatLocal = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
@@ -101,30 +105,43 @@ async function syncDevice(device, full) {
   };
 }
 
+function canSync(user) {
+  return ['superadmin', 'sdm'].includes(user?.role);
+}
+
+export async function GET(request) {
+  const user = await getUserSession(request);
+  if (!canSync(user)) return NextResponse.json({ error: 'Akses ditolak.' }, { status: 403 });
+  const jobId = new URL(request.url).searchParams.get('job_id');
+  const job = jobId && getSyncJob(jobId);
+  if (!job) return NextResponse.json({ error: 'Status sinkronisasi tidak ditemukan.' }, { status: 404 });
+  return NextResponse.json({ job });
+}
+
 export async function POST(request) {
   try {
     const user = await getUserSession(request);
     if (!user) return NextResponse.json({ error: 'Akses ditolak. Silakan login terlebih dahulu.' }, { status: 401 });
-    if (!['superadmin', 'sdm'].includes(user.role)) return NextResponse.json({ error: 'Akses ditolak. Hanya Super Admin dan SDM yang dapat menjalankan sinkronisasi.' }, { status: 403 });
+    if (!canSync(user)) return NextResponse.json({ error: 'Akses ditolak. Hanya Super Admin dan SDM yang dapat menjalankan sinkronisasi.' }, { status: 403 });
 
     const body = await request.json().catch(() => ({}));
-    const deviceId = parseDeviceId(body.device_id);
-    if (!deviceId) return NextResponse.json({ error: 'Pilih mesin untuk disinkronkan.' }, { status: 400 });
-    const device = await findDevice(deviceId);
-    if (!device) return NextResponse.json({ error: 'Mesin tidak ditemukan atau tidak aktif.' }, { status: 404 });
-
     const full = body.full === true;
-    const result = await runDeviceJob(
+    const deviceId = parseDeviceId(body.device_id);
+    const devices = body.all === true
+      ? await listDevices(true)
+      : [await findDevice(deviceId)].filter(Boolean);
+    if (!devices.length) return NextResponse.json({ error: body.all === true ? 'Tidak ada mesin aktif untuk disinkronkan.' : 'Mesin tidak ditemukan atau tidak aktif.' }, { status: body.all === true ? 404 : 400 });
+
+    const { job, joined } = startMasterSync(devices, (device) => runDeviceJob(
       device,
       full ? 'full' : 'incremental',
       () => syncDevice(device, full),
       (runningMode) => runningMode === 'full' || !full
     ).finally(() => {
-      // Sambungkan kembali real-time listener begitu pekerjaan sinkronisasi selesai
       refreshRealtimeDevices().catch(() => {});
-    });
+    }));
 
-    return NextResponse.json({ ...result, device: { id: device.id, code: device.code, name: device.name } });
+    return NextResponse.json({ message: joined ? 'Bergabung ke sinkronisasi yang sedang berjalan.' : 'Sinkronisasi dimulai di latar belakang.', job }, { status: 202 });
   } catch (error) {
     console.error('Sync Error:', error);
     return NextResponse.json({ error: error.message || 'Sinkronisasi gagal.' }, { status: 502 });
