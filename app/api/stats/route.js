@@ -3,6 +3,9 @@ import { query } from '@/lib/db';
 import { getUserSession } from '@/lib/auth';
 import { requireDevice } from '@/lib/devices';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 const pad = (n) => String(n).padStart(2, '0');
 const jakartaDateFormatter = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Asia/Jakarta',

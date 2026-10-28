@@ -6,6 +6,13 @@ import AttendanceChart from "@/app/components/AttendanceChart";
 import DeviceSelect, { useSelectedDevice } from "@/app/components/DeviceSelect";
 import { useRealtimeStream } from "@/app/components/useRealtimeStream";
 import { useParams } from "next/navigation";
+import Modal from "@/app/components/Modal";
+
+function todayInJakarta() {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
 
 export default function EmployeeProfile() {
   const { uid } = useParams();
@@ -14,6 +21,17 @@ export default function EmployeeProfile() {
   const [chartData, setChartData] = useState([]);
   const [logs, setLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [canManageAttendance, setCanManageAttendance] = useState(false);
+  const [absenceModal, setAbsenceModal] = useState({ open: false, type: "Izin", date: todayInJakarta(), reason: "", error: "" });
+  const [isSavingAbsence, setIsSavingAbsence] = useState(false);
+  const [recap, setRecap] = useState({ loading: false, period: "weekly", data: null, error: "" });
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((response) => response.ok ? response.json() : null)
+      .then((json) => setCanManageAttendance(["superadmin", "sdm"].includes(json?.user?.role)))
+      .catch(() => setCanManageAttendance(false));
+  }, []);
 
   const fetchData = useCallback(async () => {
     if (!devicesLoaded) return;
@@ -29,7 +47,7 @@ export default function EmployeeProfile() {
 
       // 2. Get 7-Day Stats for this user
       const statsRes = deviceId
-        ? await fetch(`/api/stats?employee_uid=${encodeURIComponent(uid)}&device_id=${encodeURIComponent(deviceId)}`)
+        ? await fetch(`/api/stats?employee_uid=${encodeURIComponent(uid)}&device_id=${encodeURIComponent(deviceId)}`, { cache: "no-store" })
         : null;
       if (statsRes?.ok) {
         const statsJson = await statsRes.json();
@@ -62,6 +80,41 @@ export default function EmployeeProfile() {
       fetchData();
     }
   });
+
+  const saveAbsence = async (event) => {
+    event.preventDefault();
+    if (!deviceId) return;
+    setIsSavingAbsence(true);
+    setAbsenceModal((current) => ({ ...current, error: "" }));
+    try {
+      const res = await fetch(`/api/leaves?device_id=${encodeURIComponent(deviceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, date: absenceModal.date, type: absenceModal.type, reason: absenceModal.reason }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Keterangan gagal disimpan.");
+      setAbsenceModal({ open: false, type: "Izin", date: todayInJakarta(), reason: "", error: "" });
+      await fetchData();
+    } catch (error) {
+      setAbsenceModal((current) => ({ ...current, error: error.message || "Keterangan gagal disimpan." }));
+    } finally {
+      setIsSavingAbsence(false);
+    }
+  };
+
+  const loadRecap = async (period) => {
+    if (!deviceId) return;
+    setRecap({ loading: true, period, data: null, error: "" });
+    try {
+      const res = await fetch(`/api/employees/${encodeURIComponent(uid)}/recap?device_id=${encodeURIComponent(deviceId)}&period=${period}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Rekap gagal dimuat.");
+      setRecap({ loading: false, period, data: json, error: "" });
+    } catch (error) {
+      setRecap({ loading: false, period, data: null, error: error.message || "Rekap gagal dimuat." });
+    }
+  };
 
   return (
     <DashboardShell>
@@ -118,6 +171,11 @@ export default function EmployeeProfile() {
                   {employee.devices?.length ? employee.devices.map((item) => `${item.name} (UID ${item.device_uid})`).join(", ") : "-"}
                 </p>
               </div>
+              <div style={{ width: "100%", marginTop: "16px", display: "grid", gap: "8px" }}>
+                {canManageAttendance && <button type="button" onClick={() => setAbsenceModal((current) => ({ ...current, open: true }))} style={{ padding: "10px 12px", border: "1px solid var(--color-primary)", borderRadius: "8px", background: "transparent", color: "var(--color-primary)", fontWeight: 700, cursor: "pointer" }}>Beri Keterangan</button>}
+                <button type="button" onClick={() => loadRecap("weekly")} disabled={!deviceId || recap.loading} style={{ padding: "10px 12px", border: "none", borderRadius: "8px", background: "var(--color-primary)", color: "var(--color-on-primary)", fontWeight: 700, cursor: "pointer" }}>Rekap Mingguan</button>
+                <button type="button" onClick={() => loadRecap("monthly")} disabled={!deviceId || recap.loading} style={{ padding: "10px 12px", border: "1px solid var(--color-outline-variant)", borderRadius: "8px", background: "var(--color-surface)", color: "var(--color-on-background)", fontWeight: 700, cursor: "pointer" }}>Rekap Bulanan</button>
+              </div>
             </div>
 
             {/* Statistik */}
@@ -164,9 +222,29 @@ export default function EmployeeProfile() {
               </div>
             </div>
 
+            {(recap.loading || recap.error || recap.data) && (
+              <div className="glass-card" style={{ borderRadius: "16px", padding: "24px", gridColumn: "1 / -1" }}>
+                <h2 style={{ margin: "0 0 8px", fontSize: "18px", fontWeight: 700, color: "var(--color-on-background)" }}>Rekap {recap.period === "monthly" ? "Bulanan" : "Mingguan"}</h2>
+                {recap.loading ? <p style={{ color: "var(--color-outline)" }}>Memuat rekap...</p> : recap.error ? <p style={{ color: "var(--color-error)" }}>{recap.error}</p> : recap.data && <>
+                  <p style={{ margin: "0 0 16px", color: "var(--color-outline)", fontSize: "13px" }}>{recap.data.range.from} s.d. {recap.data.range.to} · {recap.data.device.name}</p>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "16px" }}>{Object.entries(recap.data.summary).map(([key, value]) => <span key={key} style={{ padding: "6px 10px", borderRadius: "14px", background: "var(--color-surface-container-high)", fontSize: "12px", color: "var(--color-on-background)" }}>{key.replace("_", " ")}: <strong>{value}</strong></span>)}</div>
+                  <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr><th style={{ textAlign: "left", padding: "8px" }}>Tanggal</th><th style={{ textAlign: "left", padding: "8px" }}>Status</th><th style={{ textAlign: "left", padding: "8px" }}>Pindaian</th><th style={{ textAlign: "left", padding: "8px" }}>Catatan</th></tr></thead><tbody>{recap.data.daily.map((day) => <tr key={day.date} style={{ borderTop: "1px solid var(--color-outline-variant)" }}><td style={{ padding: "8px" }}>{day.date}</td><td style={{ padding: "8px" }}>{day.status}</td><td style={{ padding: "8px" }}>{day.scan_count}</td><td style={{ padding: "8px" }}>{day.reason || "-"}</td></tr>)}</tbody></table></div>
+                </>}
+              </div>
+            )}
+
           </div>
         )}
       </div>
+      <Modal isOpen={absenceModal.open} onClose={() => setAbsenceModal({ open: false, type: "Izin", date: todayInJakarta(), reason: "", error: "" })} title="Keterangan Kehadiran" size="sm">
+        <form onSubmit={saveAbsence} style={{ display: "grid", gap: "14px" }}>
+          <label>Tanggal<input required type="date" value={absenceModal.date} onChange={(event) => setAbsenceModal((current) => ({ ...current, date: event.target.value }))} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px", boxSizing: "border-box" }} /></label>
+          <label>Keterangan<select value={absenceModal.type} onChange={(event) => setAbsenceModal((current) => ({ ...current, type: event.target.value }))} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px" }}><option>Izin</option><option>Sakit</option><option>Alfa</option></select></label>
+          <label>Catatan<textarea value={absenceModal.reason} onChange={(event) => setAbsenceModal((current) => ({ ...current, reason: event.target.value }))} maxLength={1000} rows={3} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px", boxSizing: "border-box" }} /></label>
+          {absenceModal.error && <p style={{ margin: 0, color: "var(--color-error)" }}>{absenceModal.error}</p>}
+          <button disabled={isSavingAbsence} type="submit" style={{ padding: "10px", border: "none", borderRadius: "8px", background: "var(--color-primary)", color: "var(--color-on-primary)", fontWeight: 700, cursor: "pointer" }}>{isSavingAbsence ? "Menyimpan..." : "Simpan Keterangan"}</button>
+        </form>
+      </Modal>
       <style>{`
         .dashboard-container { padding: 20px 40px 80px; max-width: 1440px; margin: 0 auto; }
         @media (max-width: 767px) {
