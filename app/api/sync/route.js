@@ -109,6 +109,30 @@ function canSync(user) {
   return ['superadmin', 'sdm'].includes(user?.role);
 }
 
+// Dipakai route cron internal setelah tokennya tervalidasi. Seluruh pemicu sync
+// tetap berbagi satu master job sehingga tidak membuka koneksi ZKTeco ganda.
+export async function beginSync(body = {}, { source = 'manual', requestedBy = null } = {}) {
+  const full = body.full === true;
+  const deviceId = parseDeviceId(body.device_id);
+  const devices = body.all === true
+    ? await listDevices(true)
+    : [await findDevice(deviceId)].filter(Boolean);
+  if (!devices.length) {
+    const error = new Error(body.all === true ? 'Tidak ada mesin aktif untuk disinkronkan.' : 'Mesin tidak ditemukan atau tidak aktif.');
+    error.status = body.all === true ? 404 : 400;
+    throw error;
+  }
+
+  return startMasterSync(devices, (device) => runDeviceJob(
+    device,
+    full ? 'full' : 'incremental',
+    () => syncDevice(device, full),
+    (runningMode) => runningMode === 'full' || !full
+  ).finally(() => {
+    refreshRealtimeDevices().catch(() => {});
+  }), { source, requestedBy });
+}
+
 export async function GET(request) {
   const user = await getUserSession(request);
   if (!canSync(user)) return NextResponse.json({ error: 'Akses ditolak.' }, { status: 403 });
@@ -125,21 +149,7 @@ export async function POST(request) {
     if (!canSync(user)) return NextResponse.json({ error: 'Akses ditolak. Hanya Super Admin dan SDM yang dapat menjalankan sinkronisasi.' }, { status: 403 });
 
     const body = await request.json().catch(() => ({}));
-    const full = body.full === true;
-    const deviceId = parseDeviceId(body.device_id);
-    const devices = body.all === true
-      ? await listDevices(true)
-      : [await findDevice(deviceId)].filter(Boolean);
-    if (!devices.length) return NextResponse.json({ error: body.all === true ? 'Tidak ada mesin aktif untuk disinkronkan.' : 'Mesin tidak ditemukan atau tidak aktif.' }, { status: body.all === true ? 404 : 400 });
-
-    const { job, joined } = startMasterSync(devices, (device) => runDeviceJob(
-      device,
-      full ? 'full' : 'incremental',
-      () => syncDevice(device, full),
-      (runningMode) => runningMode === 'full' || !full
-    ).finally(() => {
-      refreshRealtimeDevices().catch(() => {});
-    }));
+    const { job, joined } = await beginSync(body, { source: 'manual', requestedBy: user.username || user.id || null });
 
     return NextResponse.json({ message: joined ? 'Bergabung ke sinkronisasi yang sedang berjalan.' : 'Sinkronisasi dimulai di latar belakang.', job }, { status: 202 });
   } catch (error) {

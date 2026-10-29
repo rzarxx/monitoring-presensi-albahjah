@@ -148,8 +148,8 @@ export default function Home() {
     }
   }, [selectedDeviceId]);
 
-  // Auto-sync & Real-time SSE setup (0 delay)
-  const autoSyncRef = useRef(false);
+  // Sinkronisasi hanya dimulai secara eksplisit oleh operator. Membuka dashboard
+  // tidak boleh menarik dump log seluruh mesin atau mengganggu listener realtime.
   const manualSyncRef = useRef(false);
 
   useEffect(() => {
@@ -160,13 +160,6 @@ export default function Home() {
     fetchMachineStatus();
     fetchChartData();
   }, [fetchLogs, fetchMachineStatus, fetchChartData, selectedDeviceId]);
-
-  useEffect(() => {
-    if (!canSync) return;
-    // Tarik data seluruh mesin sekali setelah sesi dashboard siap.
-    handleSync(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canSync]);
 
   // Dengarkan perubahan real-time via Server-Sent Events (SSE) tanpa delay
   useRealtimeStream((event) => {
@@ -205,15 +198,10 @@ export default function Home() {
 
   // Satu sinkronisasi master untuk semua mesin. Server mengembalikan 202 agar
   // reverse proxy tidak menunggu pembacaan log ZKTeco yang berukuran besar.
-  async function handleSync(silent = false) {
-    if (silent) {
-      if (autoSyncRef.current || manualSyncRef.current || document.visibilityState !== "visible") return;
-      autoSyncRef.current = true;
-    } else {
-      if (manualSyncRef.current) return;
-      manualSyncRef.current = true;
-      setIsSyncing(true);
-    }
+  async function handleSync() {
+    if (manualSyncRef.current) return;
+    manualSyncRef.current = true;
+    setIsSyncing(true);
     try {
       const res = await fetch("/api/sync", {
         method: "POST",
@@ -224,23 +212,17 @@ export default function Home() {
       if (!res.ok) throw new Error(json.error || `Server merespons ${res.status}.`);
       setSyncJobId(json.job?.id || "");
 
-      if (!silent) {
-        setSyncModal({
-          open: true,
-          success: true,
-          message: `${json.message || "Sinkronisasi dimulai."}\n${json.job?.completed || 0}/${json.job?.total || 0} mesin selesai diproses.`,
-          diagnostics: null,
-        });
-      }
+      setSyncModal({
+        open: true,
+        success: true,
+        message: `${json.message || "Sinkronisasi dimulai."}\n${json.job?.completed || 0}/${json.job?.total || 0} mesin selesai diproses.`,
+        diagnostics: null,
+      });
     } catch (e) {
-      if (!silent) setSyncModal({ open: true, success: false, message: e.message || "Koneksi ke server gagal." });
+      setSyncModal({ open: true, success: false, message: e.message || "Koneksi ke server gagal." });
       setIsSyncing(false);
     } finally {
-      if (silent) {
-        autoSyncRef.current = false;
-      } else {
-        manualSyncRef.current = false;
-      }
+      manualSyncRef.current = false;
     }
   }
 

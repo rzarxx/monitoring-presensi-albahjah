@@ -35,6 +35,7 @@ export default function DashboardShell({ children, metrics }) {
     { href: "/", label: "Dashboard", icon: "dashboard" },
     { href: "/employees", label: "Pejuang", icon: "groups" },
     ...(isSuperAdmin ? [{ href: "/devices", label: "Mesin", icon: "memory" }] : []),
+    ...(isSuperAdmin ? [{ href: "/activity", label: "Aktivitas", icon: "receipt_long" }] : []),
     ...(isSuperAdmin ? [{ href: "/admins", label: "Admin", icon: "admin_panel_settings" }] : []),
   ];
 

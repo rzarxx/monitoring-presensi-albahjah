@@ -88,6 +88,7 @@ Migrasi membuat segment, perangkat, dan pemetaan pengguna perangkat. Semua log l
 | `ADMIN_USER`, `ADMIN_PASSWORD` | Akun bootstrap saat tabel admin belum berisi data. Gunakan nilai yang kuat. |
 | `JWT_SECRET` | Kunci penandatanganan sesi JWT; wajib unik dan rahasia. |
 | `NEXT_PUBLIC_APP_URL` | URL publik aplikasi, misalnya `https://absensi.example.org`. Nilai ini dipakai saat build untuk metadata publik. |
+| `SYNC_CRON_TOKEN` | Token rahasia khusus cron server untuk memulai sinkronisasi incremental. Jangan gunakan atau ekspos sebagai token pengguna. |
 
 ## Cara menggunakan
 
@@ -96,6 +97,23 @@ Migrasi membuat segment, perangkat, dan pemetaan pengguna perangkat. Semua log l
 3. Kelola UID, nama, dan departemen karyawan melalui menu **Karyawan**.
 4. Superadmin dapat mengelola akun melalui menu **Admin**.
 5. Filter dan unduh laporan dari dasbor dalam format Excel atau PDF.
+6. Super Admin dapat membuka menu **Aktivitas** untuk memeriksa riwayat sinkronisasi dan error mesin tanpa akses terminal.
+
+## Sinkronisasi terjadwal dan log operasional
+
+Setelah deployment, jalankan migrasi non-destruktif berikut satu kali untuk membuat tabel audit operasional:
+
+```bash
+npm run migrate:operations
+```
+
+Lalu jadwalkan cron Linux setiap 15 menit. Simpan token hanya pada file environment yang dapat dibaca root, lalu gunakan nilainya sebagai header `Authorization`; jangan menaruh token dalam repository atau browser.
+
+```cron
+*/15 * * * * curl --fail --silent --show-error --max-time 30 -X POST https://presensi.example.org/api/cron/sync -H "Authorization: Bearer TOKEN_RAHASIA_CRON" -H "Content-Type: application/json" --data '{}'
+```
+
+Endpoint ini selalu menjalankan sync incremental untuk semua mesin aktif dan menggabungkan pemanggilan cron yang bertumpuk ke job yang sedang berjalan. Interval 15 menit adalah titik awal yang aman; naikkan menjadi 30 menit bila satu siklus belum selesai sebelum jadwal berikutnya. Jangan kembalikan auto-sync saat login, karena login banyak pengguna dapat memicu pembacaan mesin berulang.
 
 ## Struktur proyek
 
@@ -145,6 +163,7 @@ Lakukan hard refresh pada browser setelah deploy agar aset lama dari cache tidak
 | `npm run build` | Membuat build production. |
 | `npm run start` | Menjalankan build production secara langsung. |
 | `npm run migrate:devices` | Menambahkan skema multi-mesin tanpa menghapus log lama. |
+| `npm run migrate:operations` | Menambahkan tabel log operasional non-destruktif. |
 
 ## Lisensi
 
