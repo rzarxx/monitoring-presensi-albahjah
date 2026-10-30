@@ -28,8 +28,10 @@ export async function POST(request, context) {
     return NextResponse.json({
       online: false,
       ready: false,
+      probeStatus: 'unavailable',
       error: `Handshake ZKTeco gagal: ${describeZkError(error)}`,
-    }, { status: 503 });
+      message: 'Mesin belum siap untuk sinkronisasi. Periksa daya, kabel jaringan, IP/port, dan profil firmware.',
+    });
   } finally {
     // runDeviceJob menghentikan listener realtime agar tidak berbagi socket;
     // aktifkan lagi setelah probe selesai.

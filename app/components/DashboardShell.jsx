@@ -68,7 +68,7 @@ export default function DashboardShell({ children, metrics }) {
       }} />
 
       {/* ── TopAppBar ─────────────────────────────────────────────────── */}
-      <header style={{
+      <header className="app-header" style={{
         position: "sticky", top: 0, zIndex: 50,
         /* Glassmorphism navbar */
         background: "rgba(255, 255, 255, 0.78)",
@@ -131,6 +131,7 @@ export default function DashboardShell({ children, metrics }) {
           <button
             onClick={() => setShowLogoutModal(true)}
             title="Keluar"
+            className="account-control"
             style={{
               display: "flex", alignItems: "center", gap: "8px",
               padding: "7px 12px", border: "1px solid var(--color-outline-variant)",
@@ -228,7 +229,7 @@ export default function DashboardShell({ children, metrics }) {
       </Modal>
 
       {/* ── Footer ────────────────────────────────────────────────── */}
-      <footer style={{
+      <footer className="app-footer" style={{
         textAlign: "center",
         padding: "14px 24px",
         borderTop: "1px solid var(--color-outline-variant)",
@@ -250,7 +251,12 @@ export default function DashboardShell({ children, metrics }) {
 
       <style>{`
         @media (min-width: 768px) { .bottom-nav { display: none !important; } footer { padding-bottom: 14px !important; } }
-        @media (max-width: 767px) { footer { margin-bottom: 70px; } .hide-mobile { display: none !important; } .mobile-px { padding-left: 16px !important; padding-right: 16px !important; } }
+        @media (max-width: 767px) {
+          footer { margin-bottom: 70px; }
+          .hide-mobile { display: none !important; }
+          .mobile-px { padding-left: 16px !important; padding-right: 16px !important; }
+          .app-header, .bottom-nav, .app-footer, .account-control { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+        }
       `}</style>
     </div>
   );
