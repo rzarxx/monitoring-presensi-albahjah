@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import net from 'net';
-import { getDeviceOnlineStatus, isDeviceBusy, setDeviceOnlineStatus } from '@/lib/zkteco';
+import { describeZkError, isDeviceBusy, probeZkDevice, runDeviceJob } from '@/lib/zkteco';
 import { getUserSession } from '@/lib/auth';
 import { findDevice, parseDeviceId } from '@/lib/devices';
+import { refreshRealtimeDevices } from '@/lib/realtime-monitor';
 
 export async function POST(request, context) {
   const user = await getUserSession(request);
@@ -11,17 +11,28 @@ export async function POST(request, context) {
   const device = await findDevice(parseDeviceId(id));
   if (!device) return NextResponse.json({ error: 'Mesin tidak ditemukan.' }, { status: 404 });
 
-  const cached = getDeviceOnlineStatus(device);
-  const online = isDeviceBusy(device)
-    || (cached && cached.online && Date.now() - cached.updatedAt < 30000)
-    || await new Promise((resolve) => {
-      const socket = new net.Socket();
-      socket.setTimeout(3000);
-      socket.once('connect', () => { socket.destroy(); resolve(true); });
-      socket.once('timeout', () => { socket.destroy(); resolve(false); });
-      socket.once('error', () => { socket.destroy(); resolve(false); });
-      socket.connect(device.port, device.host);
+  if (isDeviceBusy(device)) {
+    return NextResponse.json({ error: 'Mesin sedang dipakai sinkronisasi. Tunggu hingga selesai sebelum menguji kesiapan.' }, { status: 409 });
+  }
+
+  try {
+    const result = await runDeviceJob(device, 'probe', () => probeZkDevice(device));
+    const machine = result.machine || {};
+    return NextResponse.json({
+      online: true,
+      ready: true,
+      machine,
+      message: `Handshake ZKTeco berhasil. Mesin siap sinkronisasi (${machine.userCount || 0} pengguna, ${machine.logCount || 0} log).`,
     });
-  setDeviceOnlineStatus(device, online);
-  return NextResponse.json({ online, message: online ? 'Koneksi TCP berhasil.' : 'Mesin tidak dapat dijangkau.' });
+  } catch (error) {
+    return NextResponse.json({
+      online: false,
+      ready: false,
+      error: `Handshake ZKTeco gagal: ${describeZkError(error)}`,
+    }, { status: 503 });
+  } finally {
+    // runDeviceJob menghentikan listener realtime agar tidak berbagi socket;
+    // aktifkan lagi setelah probe selesai.
+    refreshRealtimeDevices().catch(() => {});
+  }
 }
