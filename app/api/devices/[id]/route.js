@@ -6,6 +6,7 @@ import { emitRealtimeEvent } from '@/lib/events';
 import { refreshRealtimeDevices } from '@/lib/realtime-monitor';
 
 const models = new Set(['X105', 'X103', 'OTHER']);
+const syncProfiles = new Set(['auto', 'modern', 'legacy']);
 
 export async function PUT(request, context) {
   const user = await getUserSession(request);
@@ -21,8 +22,12 @@ export async function PUT(request, context) {
     const segmentId = body.segment_id ? Number.parseInt(body.segment_id, 10) : null;
     const isActive = body.is_active === false ? 0 : 1;
     const model = models.has(body.model) ? body.model : 'OTHER';
+    const syncProfile = syncProfiles.has(body.sync_profile) ? body.sync_profile : 'auto';
+    const lookbackHours = Number.parseInt(body.sync_lookback_hours ?? 72, 10);
+    const firmwareNote = String(body.firmware_note || '').trim().slice(0, 255) || null;
     if (!name || !host || !Number.isInteger(port) || port < 1 || port > 65535) return NextResponse.json({ error: 'Data mesin tidak valid.' }, { status: 422 });
-    const result = await query(`UPDATE devices SET segment_id = ?, name = ?, model = ?, host = ?, port = ?, is_active = ? WHERE id = ?`, [segmentId, name, model, host, port, isActive, deviceId]);
+    if (!Number.isInteger(lookbackHours) || lookbackHours < 1 || lookbackHours > 720) return NextResponse.json({ error: 'Jendela pemulihan harus antara 1 sampai 720 jam.' }, { status: 422 });
+    const result = await query(`UPDATE devices SET segment_id = ?, name = ?, model = ?, host = ?, port = ?, sync_profile = ?, sync_lookback_hours = ?, firmware_note = ?, is_active = ? WHERE id = ?`, [segmentId, name, model, host, port, syncProfile, lookbackHours, firmwareNote, isActive, deviceId]);
     if (result.affectedRows === 0) return NextResponse.json({ error: 'Mesin tidak ditemukan.' }, { status: 404 });
     refreshRealtimeDevices().catch(() => {});
     emitRealtimeEvent('devices', { action: 'update', device_id: deviceId });

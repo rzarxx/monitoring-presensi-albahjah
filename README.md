@@ -78,6 +78,22 @@ npm run migrate:devices
 
 Migrasi membuat segment, perangkat, dan pemetaan pengguna perangkat. Semua log lama dipertahankan dan dipetakan ke mesin `LEGACY-01`; tidak ada tabel presensi yang dihapus. Setelah itu, masuk sebagai Super Admin ke menu **Mesin** untuk membuat segment dan menambahkan perangkat Solution X105 atau X103. Data dasbor, sinkronisasi, statistik, serta ekspor dipilih per mesin.
 
+## Kompatibilitas firmware dan pemulihan scan
+
+Setelah deployment pembaruan kompatibilitas, jalankan migrasi berikut satu kali:
+
+```bash
+npm run migrate:device-profiles
+```
+
+Menu **Mesin** kemudian menyediakan profil data untuk setiap perangkat:
+
+- **Otomatis** adalah pilihan awal yang aman.
+- **Modern** digunakan perangkat yang mengirim user 72-byte dan log 40-byte.
+- **Legacy** digunakan perangkat lama yang mengirim user 28-byte dan log 16-byte.
+
+Jangan mengubah firmware atau menghapus data mesin untuk mengatasi koneksi. Uji kesiapan lebih dahulu, pilih profil hanya untuk mesin yang gagal membaca data, lalu lakukan sinkronisasi penuh satu kali. Jendela pemulihan default 72 jam membuat scan terlambat ditarik ulang dengan aman; duplikasi ditolak oleh database.
+
 ## Konfigurasi environment
 
 | Variabel | Kegunaan |
@@ -164,6 +180,7 @@ Lakukan hard refresh pada browser setelah deploy agar aset lama dari cache tidak
 | `npm run start` | Menjalankan build production secara langsung. |
 | `npm run migrate:devices` | Menambahkan skema multi-mesin tanpa menghapus log lama. |
 | `npm run migrate:operations` | Menambahkan tabel log operasional non-destruktif. |
+| `npm run migrate:device-profiles` | Menambahkan profil firmware dan jendela pemulihan scan per mesin. |
 
 ## Lisensi
 

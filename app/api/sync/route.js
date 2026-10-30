@@ -23,12 +23,13 @@ function latestRecordTime(logs) {
   return latest;
 }
 
-async function buildDiagnostics(device, { logs, machine, partial }) {
+async function buildDiagnostics(device, { logs, machine, partial, profile, userFormat, attendanceFormat, userSyncWarning }) {
   const [row] = await query(`SELECT COUNT(*) AS total, MAX(timestamp) AS latest FROM attendance_logs WHERE device_id = ?`, [device.id]);
   const latestMachine = latestRecordTime(logs);
   const latestDatabase = row?.latest ? new Date(row.latest) : null;
   const warnings = [];
   if (partial) warnings.push(`Pembacaan log terhenti sebelum selesai: ${partial}`);
+  if (userSyncWarning) warnings.push(`Daftar user belum diperbarui: ${userSyncWarning}`);
   if (machine && logs.length < machine.logCount) {
     warnings.push(`Mesin melaporkan ${machine.logCount} log, tetapi hanya ${logs.length} yang terbaca. Coba sinkronkan ulang.`);
   }
@@ -41,6 +42,7 @@ async function buildDiagnostics(device, { logs, machine, partial }) {
     database_log_count: Number(row?.total || 0),
     latest_machine_log: latestMachine ? formatLocal(latestMachine) : null,
     latest_database_log: latestDatabase ? formatLocal(latestDatabase) : null,
+    formats: { profile: profile || 'auto', users: userFormat, attendance: attendanceFormat },
     warnings,
   };
 }
@@ -75,7 +77,11 @@ async function syncDevice(device, full) {
     const rows = await query(`SELECT MAX(timestamp) AS last_time FROM attendance_logs WHERE device_id = ?`, [device.id]);
     if (rows[0]?.last_time) {
       const lastTime = new Date(rows[0].last_time).getTime();
-      logsToSave = logs.filter((log) => new Date(log.recordTime).getTime() > lastTime);
+      const lookbackHours = Math.min(Math.max(Number(device.sync_lookback_hours || 72), 1), 720);
+      const cutoff = lastTime - lookbackHours * 60 * 60 * 1000;
+      // Jendela overlap mencegah scan yang terlambat ditransfer atau jam mesin yang
+      // sedikit mundur terlewat. Unique key database tetap menjaga duplikasi.
+      logsToSave = logs.filter((log) => new Date(log.recordTime).getTime() >= cutoff);
     }
   }
 
