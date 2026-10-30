@@ -9,7 +9,8 @@
     "lint": "eslint",
     "migrate:devices": "node scripts/migrate-multi-device.js",
     "migrate:mapping": "node scripts/migrate-employee-mapping.js",
-    "migrate:operations": "node scripts/migrate-operational-logs.js"
+    "migrate:operations": "node scripts/migrate-operational-logs.js",
+    "migrate:device-profiles": "node scripts/migrate-device-sync-profiles.js"
   },
   "dependencies": {
     "jose": "^6.2.8",
