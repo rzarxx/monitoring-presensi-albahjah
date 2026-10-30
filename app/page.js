@@ -1,12 +1,17 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import DashboardShell from "@/app/components/DashboardShell";
 import Modal from "@/app/components/Modal";
-import AttendanceChart from "@/app/components/AttendanceChart";
 import DeviceSelect, { useSelectedDevice } from "@/app/components/DeviceSelect";
 import { useRealtimeStream } from "@/app/components/useRealtimeStream";
+
+const AttendanceChart = dynamic(() => import("@/app/components/AttendanceChart"), {
+  ssr: false,
+  loading: () => <div style={{ height: "300px" }} aria-label="Memuat grafik kehadiran" />,
+});
 
 // "2026-10-17 10:25:59" -> "17/10/2026 10:25"
 function formatScanTime(value) {
