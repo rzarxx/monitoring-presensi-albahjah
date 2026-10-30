@@ -52,16 +52,20 @@ async function syncDevice(device, full) {
 
   // Bulk upsert seluruh user mesin dalam batch (jauh lebih cepat dibanding loop satu per satu)
   const enrollmentRows = [];
+  let usersWithoutName = 0;
   for (const machineUser of users || []) {
     const uid = Number.parseInt(machineUser.userId, 10);
     if (!Number.isInteger(uid)) continue;
-    enrollmentRows.push([device.id, uid, String(machineUser.name || '').trim()]);
+    const displayName = String(machineUser.name || '').trim();
+    if (!displayName) usersWithoutName++;
+    enrollmentRows.push([device.id, uid, displayName]);
   }
   for (let index = 0; index < enrollmentRows.length; index += 1000) {
     const batch = enrollmentRows.slice(index, index + 1000);
     await query(
       `INSERT INTO device_enrollments (device_id, device_uid, display_name) VALUES ?
-       ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)`,
+       ON DUPLICATE KEY UPDATE
+         display_name = IF(VALUES(display_name) <> '', VALUES(display_name), display_name)`,
       [batch]
     );
   }
@@ -95,12 +99,14 @@ async function syncDevice(device, full) {
     device_id: device.id,
     synced: totalInserted,
     users_synced: users?.length || 0,
+    users_without_name: usersWithoutName,
   });
 
   return {
     message: logs.length ? 'Sinkronisasi berhasil.' : 'Tidak ada data absensi dari mesin.',
     synced: totalInserted,
     users_synced: users?.length || 0,
+    users_without_name: usersWithoutName,
     diagnostics: await buildDiagnostics(device, pulled),
   };
 }
