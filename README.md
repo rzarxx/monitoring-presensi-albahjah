@@ -74,6 +74,16 @@ Dashboard web untuk memantau presensi karyawan dari mesin sidik jari ZKTeco. Apl
 
    Buka `http://localhost:3000` lalu masuk memakai akun yang telah dibuat.
 
+## Memperbarui peran akun
+
+Untuk database lama yang belum menerima peran kepala divisi atau kepala subdivisi, backup database lalu jalankan migrasi berikut setelah memperbarui kode:
+
+```bash
+npm run migrate:admin-roles
+```
+
+Migrasi mempertahankan data akun dan dapat dijalankan ulang. Akun database memerlukan hak `ALTER` pada tabel `admins`. Migrasi tidak menggunakan `scripts/init-db.js`.
+
 ## Mengaktifkan multi-mesin
 
 Untuk database yang sudah berisi data, lakukan backup database terlebih dahulu. Kemudian jalankan migrasi non-destruktif berikut satu kali:
