@@ -84,6 +84,10 @@ npm run migrate:admin-roles
 
 Migrasi mempertahankan data akun dan dapat dijalankan ulang. Akun database memerlukan hak `ALTER` pada tabel `admins`. Migrasi tidak menggunakan `scripts/init-db.js`.
 
+## Mengaktifkan jam hadir manual
+
+Setelah backup database dan memperbarui kode, jalankan `npm run migrate:manual-attendance` sebelum menjalankan versi baru. Migrasi menambahkan kolom pada tabel `leaves`, mempertahankan data lama, dan dapat dijalankan ulang. Akun database memerlukan hak `ALTER`. Hanya Super Admin dapat menyimpan atau mengubah hadir manual; jam masuk wajib dan jam keluar opsional pada tanggal yang sama. Catatan manual tetap ditandai sebagai manual, dan tap mesin yang muncul kemudian menjadi sumber utama laporan pada hari tersebut.
+
 ## Mengaktifkan multi-mesin
 
 Untuk database yang sudah berisi data, lakukan backup database terlebih dahulu. Kemudian jalankan migrasi non-destruktif berikut satu kali:

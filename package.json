@@ -13,6 +13,7 @@
     "migrate:operations": "node scripts/migrate-operational-logs.js",
     "migrate:auth-security": "node scripts/migrate-auth-security.js",
     "migrate:admin-roles": "node scripts/migrate-admin-roles.js",
+    "migrate:manual-attendance": "node scripts/migrate-manual-attendance.js",
     "migrate:device-profiles": "node scripts/migrate-device-sync-profiles.js"
   },
   "dependencies": {

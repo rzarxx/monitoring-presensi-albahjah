@@ -70,6 +70,9 @@ async function resetDb() {
       date DATE NOT NULL,
       type VARCHAR(50) NOT NULL,
       reason TEXT,
+      manual_check_in TIME NULL,
+      manual_check_out TIME NULL,
+      manual_by VARCHAR(255) NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_uid_date (uid, date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

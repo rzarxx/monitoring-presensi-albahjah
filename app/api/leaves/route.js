@@ -46,6 +46,15 @@ export async function POST(request) {
     if (!Number.isSafeInteger(uid) || uid < 1 || !parsedDate || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date || !leaveTypes.has(type) || reason.length > 1000) {
       return NextResponse.json({ error: 'Data keterangan ketidakhadiran tidak valid.' }, { status: 422 });
     }
+    if (type === 'Hadir' && user.role !== 'superadmin') {
+      return NextResponse.json({ error: 'Hanya Super Admin yang dapat mencatat hadir manual.' }, { status: 403 });
+    }
+    const checkIn = type === 'Hadir' ? String(body.check_in || '') : '';
+    const checkOut = type === 'Hadir' ? String(body.check_out || '') : '';
+    const validTime = (value) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+    if (type === 'Hadir' && (!validTime(checkIn) || (checkOut && (!validTime(checkOut) || checkOut <= checkIn)))) {
+      return NextResponse.json({ error: 'Jam masuk wajib diisi dan jam keluar harus lebih akhir pada tanggal yang sama.' }, { status: 422 });
+    }
 
     connection = await getPool().getConnection();
     await connection.beginTransaction();
@@ -61,11 +70,15 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Pejuang sudah melakukan tap pada tanggal tersebut.' }, { status: 409 });
     }
 
-    const [existing] = await connection.query(`SELECT id FROM leaves WHERE device_id = ? AND uid = ? AND date = ?`, [device.id, uid, date]);
+    const [existing] = await connection.query(`SELECT id, type FROM leaves WHERE device_id = ? AND uid = ? AND date = ?`, [device.id, uid, date]);
+    if (user.role !== 'superadmin' && existing.some((row) => row.type === 'Hadir')) {
+      await connection.rollback();
+      return NextResponse.json({ error: 'Hanya Super Admin yang dapat mengubah hadir manual.' }, { status: 403 });
+    }
     if (existing.length > 0) {
-      await connection.query(`UPDATE leaves SET type = ?, reason = ? WHERE device_id = ? AND uid = ? AND date = ?`, [type, reason, device.id, uid, date]);
+      await connection.query(`UPDATE leaves SET type = ?, reason = ?, manual_check_in = ?, manual_check_out = ?, manual_by = ? WHERE device_id = ? AND uid = ? AND date = ?`, [type, reason, checkIn || null, checkOut || null, type === 'Hadir' ? user.username || null : null, device.id, uid, date]);
     } else {
-      await connection.query(`INSERT INTO leaves (device_id, uid, date, type, reason) VALUES (?, ?, ?, ?, ?)`, [device.id, uid, date, type, reason]);
+      await connection.query(`INSERT INTO leaves (device_id, uid, date, type, reason, manual_check_in, manual_check_out, manual_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [device.id, uid, date, type, reason, checkIn || null, checkOut || null, type === 'Hadir' ? user.username || null : null]);
     }
     await connection.commit();
 

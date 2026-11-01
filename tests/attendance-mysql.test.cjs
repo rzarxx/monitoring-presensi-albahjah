@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const mysql = require('mysql2/promise');
+const { execFileSync } = require('node:child_process');
 
 const port = Number(process.env.ATTENDANCE_AUDIT_PORT || 0);
 
@@ -25,6 +26,9 @@ test('attendance queries and department isolation on an isolated MySQL instance'
       'CREATE TABLE login_attempt_limits (account_key CHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY, attempts INT UNSIGNED NOT NULL, window_start DATETIME NOT NULL, INDEX idx_login_attempt_window (window_start)) ENGINE=InnoDB',
       'CREATE TABLE admins (id INT PRIMARY KEY AUTO_INCREMENT, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, role VARCHAR(50), department VARCHAR(255))',
     ]) await query(sql);
+    const env = { ...process.env, DB_HOST: '127.0.0.1', DB_PORT: String(port), DB_USER: 'root', DB_PASSWORD: '', DB_NAME: database };
+    execFileSync(process.execPath, ['scripts/migrate-manual-attendance.js'], { env });
+    execFileSync(process.execPath, ['scripts/migrate-manual-attendance.js'], { env });
     const [[{ today }]] = await pool.query("SELECT DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 7 HOUR, '%Y-%m-%d') AS today");
     await query("INSERT INTO employees VALUES (1,'Nama Sama','Teknik'),(2,'Nama Sama','Teknik'),(3,'Lain','SDM')");
     await query("INSERT INTO device_enrollments (device_id,device_uid,employee_uid,display_name) VALUES (2,11,1,'A'),(2,14,1,'A2'),(2,12,2,'B'),(2,13,3,'C'),(2,2,NULL,'Unmapped'),(3,11,3,'Other')");
@@ -82,18 +86,37 @@ test('attendance queries and department isolation on an isolated MySQL instance'
     assert.equal(summary.sakit, 0);
 
     const leaves = await load('app/api/leaves/route.js');
-    const save = (uid, type) => leaves.POST({ url: 'http://localhost/api/leaves?device_id=2', json: async () => ({ uid, date: today, type }) });
+    const save = (uid, type) => leaves.POST({ url: 'http://localhost/api/leaves?device_id=2', json: async () => ({ uid, date: today, type, check_in: '08:15', check_out: '16:30' }) });
     assert.equal((await save(3, 'Alfa')).status, 404);
     assert.equal((await save(1, 'Alfa')).status, 409);
+    assert.equal((await save(2, 'Hadir')).status, 403);
+    user.role = 'superadmin';
+    user.username = 'super-tester';
     assert.equal((await save(2, 'Hadir')).status, 200);
+    user.role = 'kepala_divisi';
+    assert.equal((await save(2, 'Alfa')).status, 403);
+    const [savedPresence] = await query('SELECT manual_by FROM leaves WHERE device_id = 2 AND uid = 2 AND date = ? LIMIT 1', [today]);
+    assert.equal(savedPresence.manual_by, 'super-tester');
     const updated = await report.getAttendanceReport({ deviceId: 2, user, dateFrom: today, dateTo: today, department: user.department });
     assert.equal(updated.find((row) => row.employee_key === '2').leave_type, 'Hadir');
+    assert.equal(updated.find((row) => row.employee_key === '2').jam_masuk, '08:15');
+    assert.equal(updated.find((row) => row.employee_key === '2').jam_keluar, '16:30');
+    assert.equal(Number(updated.find((row) => row.employee_key === '2').dur_min), 495);
+    const manualRecap = await recap.GET({ url: 'http://localhost/api/employees/2/recap?device_id=2&period=weekly' }, { params: Promise.resolve({ uid: '2' }) });
+    assert.equal(manualRecap.body.daily.find((entry) => entry.date === today).check_in, '08:15');
+    assert.equal(manualRecap.body.daily.find((entry) => entry.date === today).check_out, '16:30');
+    const manualLogs = await logs.GET({ url: `http://localhost/api/logs?device_id=2&date=${today}&limit=100` });
+    assert.equal(manualLogs.body.report.find((entry) => entry.employee_uid === 2).leave_type, 'Hadir');
+    const manualStats = await stats.GET({ url: 'http://localhost/api/stats?device_id=2' });
+    assert.equal(manualStats.body.data.find((entry) => entry.date === today).hadir, 2);
     dependencies['@/lib/attendance-report'] = { getAttendanceReport: report.getAttendanceReport };
     const pdf = await load('app/api/pdf/route.js');
     const pdfResponse = await pdf.GET({ url: `http://localhost/api/pdf?device_id=2&date_from=${today}&date_to=${today}` });
     assert.equal(pdfResponse.status, 200, pdfResponse.body?.error);
     const pdfHtml = await pdfResponse.text();
     assert.match(pdfHtml, /Hadir manual/);
+    assert.match(pdfHtml, /08:15/);
+    assert.match(pdfHtml, /16:30/);
     assert.doesNotMatch(pdfHtml, /other department/);
     const excel = await load('app/api/export/route.js');
     const excelResponse = await excel.GET({ url: `http://localhost/api/export?device_id=2&date_from=${today}&date_to=${today}` });
@@ -102,8 +125,16 @@ test('attendance queries and department isolation on an isolated MySQL instance'
     const workbook = xlsx.read(Buffer.from(await excelResponse.arrayBuffer()), { type: 'buffer' });
     const cells = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }).flat();
     assert.equal(cells.filter((value) => value === 'Nama Sama').length, 2);
-    assert.ok(cells.includes('Hadir manual'));
+    assert.ok(cells.includes('08:15 (manual)'));
+    assert.ok(cells.includes('16:30'));
     assert.ok(!cells.includes('Lain'));
+
+    await query('INSERT INTO attendance_logs (device_id,uid,timestamp) VALUES (2,12,?)', [`${today} 09:00:00`]);
+    const afterTap = await report.getAttendanceReport({ deviceId: 2, user, dateFrom: today, dateTo: today, department: user.department });
+    const personTwo = afterTap.filter((row) => row.employee_key === '2');
+    assert.equal(personTwo.length, 1);
+    assert.equal(personTwo[0].leave_type, null);
+    assert.equal(personTwo[0].jam_masuk, '09:00');
 
     await query("INSERT INTO employees VALUES (4,'Concurrent','Teknik')");
     await query("INSERT INTO device_enrollments (device_id,device_uid,employee_uid,display_name) VALUES (2,15,4,'Concurrent')");
