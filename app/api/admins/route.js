@@ -10,8 +10,8 @@ export async function GET(request) {
     if (!user || user.role !== 'superadmin') {
       return NextResponse.json({ error: 'Akses ditolak.' }, { status: 403 });
     }
-    const admins = await query(`SELECT id, username, role, department, created_at FROM admins ORDER BY created_at DESC`);
-    return NextResponse.json(admins);
+    const admins = await query(`SELECT id, username, role, department, created_at FROM admins ORDER BY created_at DESC, id DESC`);
+    return NextResponse.json(admins, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
