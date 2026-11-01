@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import DashboardShell from "@/app/components/DashboardShell";
 import Modal from "@/app/components/Modal";
 import { useRealtimeStream } from "@/app/components/useRealtimeStream";
@@ -9,6 +9,8 @@ export default function Admins() {
   const [admins, setAdmins] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const requestSequence = useRef(0);
   const [modal, setModal] = useState({ open: false, mode: 'add', data: null });
   const [formData, setFormData] = useState({ username: '', password: '', role: 'admin', department: '' });
   const [alertMsg, setAlertMsg] = useState(null);
@@ -30,22 +32,24 @@ export default function Admins() {
   });
 
   async function fetchAdmins() {
-    setLoading(true);
+    const sequence = ++requestSequence.current;
     try {
-      const res = await fetch("/api/admins");
+      const res = await fetch("/api/admins", { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        setAdmins(data);
+        if (sequence === requestSequence.current) setAdmins(data);
       }
     } catch (error) {
       console.error(error);
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   }
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (saving) return;
+    setSaving(true);
     try {
       const url = modal.mode === 'add' ? '/api/admins' : `/api/admins/${modal.data.id}`;
       const method = modal.mode === 'add' ? 'POST' : 'PUT';
@@ -58,6 +62,14 @@ export default function Admins() {
       const json = await res.json();
       
       if (res.ok) {
+        ++requestSequence.current;
+        const account = { username: formData.username, role: formData.role, department: formData.department || '' };
+        if (modal.mode === 'add') {
+          setAdmins((current) => [{ ...account, id: json.id, created_at: new Date().toISOString() }, ...current.filter((admin) => admin.id !== json.id)]);
+        } else {
+          setAdmins((current) => current.map((admin) => admin.id === modal.data.id ? { ...admin, ...account } : admin));
+        }
+        setLoading(false);
         setAlertMsg({ type: 'success', text: json.message });
         setModal({ open: false, mode: 'add', data: null });
         fetchAdmins();
@@ -66,6 +78,8 @@ export default function Admins() {
       }
     } catch (error) {
       setAlertMsg({ type: 'error', text: "Gagal menghubungi server" });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -89,6 +103,9 @@ export default function Admins() {
       const res = await fetch(`/api/admins/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (res.ok) {
+        ++requestSequence.current;
+        setAdmins((current) => current.filter((admin) => admin.id !== id));
+        setLoading(false);
         setAlertMsg({ type: 'success', text: json.message });
         fetchAdmins();
       } else {
@@ -274,7 +291,7 @@ export default function Admins() {
           {alertMsg?.type === 'error' && <p role="alert" style={{ margin: 0, color: 'var(--color-error)', fontSize: '13px' }}>{alertMsg.text}</p>}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
             <button type="button" onClick={() => setModal({ ...modal, open: false })} style={{ padding: "10px 18px", border: "1px solid var(--color-outline-variant)", borderRadius: "8px", background: "var(--color-surface-container-lowest)", fontSize: "14px", fontWeight: 600, cursor: "pointer", color: "var(--color-on-background)" }}>Batal</button>
-            <button type="submit" style={{ padding: "10px 18px", background: "var(--color-primary)", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: 600, color: "var(--color-on-primary)", cursor: "pointer" }}>Simpan</button>
+            <button type="submit" disabled={saving} style={{ padding: "10px 18px", background: "var(--color-primary)", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: 600, color: "var(--color-on-primary)", cursor: saving ? "wait" : "pointer" }}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
           </div>
         </form>
       </Modal>
