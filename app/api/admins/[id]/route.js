@@ -28,7 +28,8 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: 'Username sudah digunakan' }, { status: 400 });
     }
 
-    const finalRole = ['admin', 'superadmin', 'sdm', 'manager'].includes(role) ? role : 'admin';
+    const finalRole = ['admin', 'superadmin', 'sdm', 'manager', 'kepala_divisi', 'kepala_subdivisi'].includes(role) ? role : 'admin';
+    if (['manager', 'kepala_divisi', 'kepala_subdivisi'].includes(finalRole) && (typeof department !== 'string' || !department.trim())) return NextResponse.json({ error: 'Departemen wajib diisi untuk kepala divisi atau subdivisi.' }, { status: 422 });
 
     if (password) {
       if (!isValidPassword(password)) return NextResponse.json({ error: 'Password minimal 12 karakter.' }, { status: 422 });

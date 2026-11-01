@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import DashboardShell from "@/app/components/DashboardShell";
 import AttendanceChart from "@/app/components/AttendanceChart";
 import DeviceSelect, { useSelectedDevice } from "@/app/components/DeviceSelect";
@@ -19,18 +19,18 @@ export default function EmployeeProfile() {
   const { devices, deviceId, setDeviceId, loaded: devicesLoaded } = useSelectedDevice();
   const [employee, setEmployee] = useState(null);
   const [chartData, setChartData] = useState([]);
-  const [logs, setLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [canManageAttendance, setCanManageAttendance] = useState(false);
   const [absenceModal, setAbsenceModal] = useState({ open: false, type: "Izin", date: todayInJakarta(), reason: "", error: "" });
   const [isSavingAbsence, setIsSavingAbsence] = useState(false);
   const [period, setPeriod] = useState("weekly");
   const [recap, setRecap] = useState({ loading: false, data: null, error: "" });
+  const recapRequest = useRef(0);
 
   useEffect(() => {
     fetch("/api/auth/me")
       .then((response) => response.ok ? response.json() : null)
-      .then((json) => setCanManageAttendance(["superadmin", "sdm"].includes(json?.user?.role)))
+      .then((json) => setCanManageAttendance(["superadmin", "sdm", "manager", "kepala_divisi", "kepala_subdivisi"].includes(json?.user?.role)))
       .catch(() => setCanManageAttendance(false));
   }, []);
 
@@ -43,7 +43,7 @@ export default function EmployeeProfile() {
       if (empRes.ok) {
         const empJson = await empRes.json();
         const found = empJson.data.find(e => String(e.uid) === uid);
-        setEmployee(found || { uid, name: "Tidak Ditemukan", department: "-", devices: [] });
+        setEmployee(found || null);
       }
 
     } catch (e) {
@@ -51,7 +51,7 @@ export default function EmployeeProfile() {
     } finally {
       setIsLoading(false);
     }
-  }, [uid, deviceId, devicesLoaded]);
+  }, [uid, devicesLoaded]);
 
   const saveAbsence = async (event) => {
     event.preventDefault();
@@ -67,7 +67,7 @@ export default function EmployeeProfile() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || "Keterangan gagal disimpan.");
       setAbsenceModal({ open: false, type: "Izin", date: todayInJakarta(), reason: "", error: "" });
-      await fetchData();
+      await loadRecap();
     } catch (error) {
       setAbsenceModal((current) => ({ ...current, error: error.message || "Keterangan gagal disimpan." }));
     } finally {
@@ -76,11 +76,14 @@ export default function EmployeeProfile() {
   };
 
   const loadRecap = useCallback(async () => {
+    const requestId = ++recapRequest.current;
     if (!deviceId) return;
     setRecap({ loading: true, data: null, error: "" });
+    setChartData([]);
     try {
       const res = await fetch(`/api/employees/${encodeURIComponent(uid)}/recap?device_id=${encodeURIComponent(deviceId)}&period=${period}`, { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
+      if (requestId !== recapRequest.current) return;
       if (!res.ok) throw new Error(json.error || "Rekap gagal dimuat.");
       setChartData(json.daily.map((day) => ({
         date: day.date,
@@ -90,20 +93,15 @@ export default function EmployeeProfile() {
         cuti: day.status === "Cuti" ? 1 : 0,
         alfa: day.status === "Alfa" ? 1 : 0,
       })));
-      const logsRes = await fetch(`/api/logs?employee_uid=${encodeURIComponent(uid)}&device_id=${encodeURIComponent(deviceId)}&date_from=${json.range.from}&date_to=${json.range.to}&limit=100`, { cache: "no-store" });
-      const logsJson = await logsRes.json().catch(() => ({}));
-      if (!logsRes.ok) throw new Error(logsJson.error || "Riwayat periode gagal dimuat.");
-      setLogs(logsJson.data || []);
       setRecap({ loading: false, data: json, error: "" });
     } catch (error) {
+      if (requestId !== recapRequest.current) return;
       setChartData([]);
-      setLogs([]);
       setRecap({ loading: false, data: null, error: error.message || "Rekap gagal dimuat." });
     }
   }, [uid, deviceId, period]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
     loadRecap();
   }, [fetchData, loadRecap]);
@@ -197,27 +195,29 @@ export default function EmployeeProfile() {
                 <table style={{ width: "100%", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
                   <thead>
                     <tr style={{ borderBottom: "2px solid #e4efff" }}>
-                      <th style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontFamily: "'JetBrains Mono', monospace", color: "var(--color-outline)", textTransform: "uppercase", fontWeight: 600 }}>Waktu</th>
-                      <th style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontFamily: "'JetBrains Mono', monospace", color: "var(--color-outline)", textTransform: "uppercase", fontWeight: 600 }}>Status</th>
+                      {["Hari dan tanggal", "Masuk pertama", "Keluar terakhir", "Status"].map((label) => <th key={label} style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", color: "var(--color-outline)", textTransform: "uppercase" }}>{label}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {logs.length === 0 ? (
+                    {!recap.data ? (
                       <tr>
-                        <td colSpan="2" style={{ padding: "24px", textAlign: "center", color: "var(--color-outline)" }}>Belum ada rekaman</td>
+                        <td colSpan="4" style={{ padding: "24px", textAlign: "center", color: "var(--color-outline)" }}>{recap.loading ? "Memuat riwayat..." : "Belum ada rekaman"}</td>
                       </tr>
-                    ) : logs.map((log) => (
-                      <tr key={log.id} style={{ borderBottom: "1px solid #eef4ff" }}>
+                    ) : [...recap.data.daily].reverse().map((day) => (
+                      <tr key={day.date} style={{ borderBottom: "1px solid #eef4ff" }}>
                         <td style={{ padding: "12px 14px", fontSize: "13px", color: "var(--color-outline)", fontFamily: "'JetBrains Mono', monospace" }}>
-                          {new Date(log.timestamp).toLocaleString("id-ID")}
+                          {new Date(`${day.date}T00:00:00Z`).toLocaleDateString("id-ID", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" })}
                         </td>
+                        <td style={{ padding: "12px 14px" }}>{day.check_in || "—"}</td>
+                        <td style={{ padding: "12px 14px" }}>{day.check_out || "—"}</td>
                         <td style={{ padding: "12px 14px", fontSize: "13px", color: "var(--color-on-background)", fontWeight: 600 }}>
-                          Sukses
+                          {day.status}{day.status === "Hadir" && !day.scan_count ? " (manual)" : ""}{day.reason ? ` — ${day.reason}` : ""}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <p style={{ fontSize: "12px", color: "var(--color-outline)" }}>Jam masuk dan keluar menggunakan scan pertama dan terakhir. Satu scan belum dapat memastikan jam keluar.</p>
               </div>
             </div>
 
@@ -227,7 +227,7 @@ export default function EmployeeProfile() {
       <Modal isOpen={absenceModal.open} onClose={() => setAbsenceModal({ open: false, type: "Izin", date: todayInJakarta(), reason: "", error: "" })} title="Keterangan Kehadiran" size="sm">
         <form onSubmit={saveAbsence} style={{ display: "grid", gap: "14px" }}>
           <label>Tanggal<input required type="date" value={absenceModal.date} onChange={(event) => setAbsenceModal((current) => ({ ...current, date: event.target.value }))} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px", boxSizing: "border-box" }} /></label>
-          <label>Keterangan<select value={absenceModal.type} onChange={(event) => setAbsenceModal((current) => ({ ...current, type: event.target.value }))} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px" }}><option>Izin</option><option>Sakit</option><option>Alfa</option></select></label>
+          <label>Keterangan<select value={absenceModal.type} onChange={(event) => setAbsenceModal((current) => ({ ...current, type: event.target.value }))} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px" }}><option>Hadir</option><option>Izin</option><option>Sakit</option><option>Alfa</option><option>Cuti</option></select></label>
           <label>Catatan<textarea value={absenceModal.reason} onChange={(event) => setAbsenceModal((current) => ({ ...current, reason: event.target.value }))} maxLength={1000} rows={3} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px", boxSizing: "border-box" }} /></label>
           {absenceModal.error && <p style={{ margin: 0, color: "var(--color-error)" }}>{absenceModal.error}</p>}
           <button disabled={isSavingAbsence} type="submit" style={{ padding: "10px", border: "none", borderRadius: "8px", background: "var(--color-primary)", color: "var(--color-on-primary)", fontWeight: 700, cursor: "pointer" }}>{isSavingAbsence ? "Menyimpan..." : "Simpan Keterangan"}</button>

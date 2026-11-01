@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import { getUserSession } from '@/lib/auth';
+import { getUserSession, isDepartmentManager } from '@/lib/auth';
 import { requireDevice } from '@/lib/devices';
+import { getAttendanceReport } from '@/lib/attendance-report';
 
 export async function GET(request) {
   try {
@@ -16,69 +16,44 @@ export async function GET(request) {
     const date_to    = searchParams.get('date_to');
     const search     = searchParams.get('search');
     const requestedDepartment = searchParams.get('department');
-    const department = user.role === 'manager' ? user.department : requestedDepartment;
-    if (user.role === 'manager' && !department) return NextResponse.json({ error: 'Akun manager belum memiliki departemen.' }, { status: 403 });
+    const department = isDepartmentManager(user.role) ? user.department : requestedDepartment;
+    if (isDepartmentManager(user.role) && !department?.trim()) return NextResponse.json({ error: 'Akun belum memiliki departemen.' }, { status: 403 });
 
-    const conditions = ['a.device_id = ?'];
-    const params = [device.id];
-    if (date_from)  { conditions.push(`DATE(a.timestamp) >= ?`); params.push(date_from); }
-    if (date_to)    { conditions.push(`DATE(a.timestamp) <= ?`); params.push(date_to); }
-    if (search)     { conditions.push(`(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)`); params.push(`%${search}%`, `%${search}%`, search); }
-    if (department) { conditions.push(`e.department LIKE ?`); params.push(`%${department}%`); }
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = await getAttendanceReport({ deviceId: device.id, user, dateFrom: date_from, dateTo: date_to, search, department });
 
-    const rows = await query(`
-      SELECT
-        DATE(a.timestamp)        AS tgl,
-        COALESCE(MAX(e.name), MAX(de.display_name), CONCAT('UID_', a.uid)) AS nama,
-        COALESCE(MAX(e.department), '-')              AS dept,
-        MIN(a.timestamp)         AS jam_masuk,
-        MAX(a.timestamp)         AS jam_keluar,
-        COUNT(a.id)              AS total_scan
-      FROM attendance_logs a
-      LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
-      LEFT JOIN employees e ON e.uid = de.employee_uid
-      ${where}
-      GROUP BY DATE(a.timestamp), a.uid
-      ORDER BY DATE(a.timestamp) ASC, e.name ASC
-    `, params);
-
-    const pad = (n) => String(n).padStart(2, '0');
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[character]);
     const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
     const DAYS   = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
 
     const formatDate = (d) => {
-      const dt = new Date(d);
-      return `${DAYS[dt.getDay()]}, ${dt.getDate()} ${MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
+      const dt = typeof d === 'string' ? new Date(`${d}T00:00:00Z`) : d;
+      return `${DAYS[dt.getUTCDay()]}, ${dt.getUTCDate()} ${MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`;
     };
     const formatTime = (d) => {
       if (!d) return '-';
-      const dt = new Date(d);
-      return `${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
+      return d;
     };
 
     const now = new Date();
-    const printedAt   = `${formatDate(now)}, ${pad(now.getHours())}:${pad(now.getMinutes())} WIB`;
+    const printedAt = new Intl.DateTimeFormat('id-ID', { timeZone: 'Asia/Jakarta', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(now) + ' WIB';
     const periodLabel = date_from && date_to
       ? `${date_from} s/d ${date_to}`
       : date_from ? `Mulai ${date_from}`
       : date_to   ? `Sampai ${date_to}`
       : 'Semua Periode';
 
-    const totalHadir    = rows.filter(r => { const ci = new Date(r.jam_masuk), co = new Date(r.jam_keluar); return !isNaN(ci) && !isNaN(co) && ci.getTime() !== co.getTime() && (co - ci) >= 7*3600000; }).length;
-    const totalMasukSaja= rows.filter(r => { const ci = new Date(r.jam_masuk), co = new Date(r.jam_keluar); return !isNaN(ci) && !isNaN(co) && ci.getTime() === co.getTime(); }).length;
-    const totalKurang   = rows.filter(r => { const ci = new Date(r.jam_masuk), co = new Date(r.jam_keluar); return !isNaN(ci) && !isNaN(co) && ci.getTime() !== co.getTime() && (co - ci) < 7*3600000; }).length;
+    const totalHadir = rows.filter(r => !r.leave_type && r.total_scan > 1 && Number(r.dur_min) >= 420).length;
+    const totalMasukSaja = rows.filter(r => !r.leave_type && (r.total_scan <= 1 || r.jam_masuk === r.jam_keluar)).length;
+    const totalKurang = rows.filter(r => !r.leave_type && r.total_scan > 1 && r.jam_masuk !== r.jam_keluar && Number(r.dur_min) < 420).length;
 
     const tableRows = rows.map((r, i) => {
-      const checkIn  = r.jam_masuk  ? new Date(r.jam_masuk)  : null;
-      const checkOut = r.jam_keluar ? new Date(r.jam_keluar) : null;
-      const isSame   = checkIn && checkOut && checkIn.getTime() === checkOut.getTime();
-      const durMs    = checkIn && checkOut && !isSame ? checkOut - checkIn : 0;
-      const durHr    = Math.floor(durMs / 3600000);
-      const durMin   = Math.floor((durMs % 3600000) / 60000);
+      const checkIn = r.jam_masuk;
+      const checkOut = r.jam_keluar;
+      const isSame = checkIn && checkOut && checkIn === checkOut;
+      const durHr = Math.floor(Number(r.dur_min || 0) / 60);
+      const durMin = Number(r.dur_min || 0) % 60;
       const durStr   = isSame || !checkIn ? '-' : `${durHr}j ${durMin}m`;
-      const status   = isSame ? 'Masuk Saja' : durHr >= 7 ? 'Hadir Penuh' : durHr > 0 ? 'Kurang Jam' : '-';
+      const status = r.leave_type ? (r.leave_type === 'Hadir' ? 'Hadir manual' : r.leave_type) : isSame ? 'Masuk Saja' : durHr >= 7 ? 'Hadir Penuh' : checkIn ? 'Kurang Jam' : '-';
       const sBg      = isSame ? '#fef9c3' : durHr >= 7 ? '#dcfce7' : durHr > 0 ? '#fee2e2' : '#f1f5f9';
       const sColor   = isSame ? '#854d0e' : durHr >= 7 ? '#166534' : durHr > 0 ? '#991b1b' : '#64748b';
       const rowBg    = i % 2 === 0 ? '#ffffff' : '#f8fdf9';
@@ -89,10 +64,10 @@ export async function GET(request) {
           <td class="td" style="font-weight:700;color:#0f172a;">${escapeHtml(r.nama)}</td>
           <td class="td" style="color:#64748b;">${escapeHtml(r.dept)}</td>
           <td class="td tc" style="font-weight:700;color:#059669;">${formatTime(r.jam_masuk)}</td>
-          <td class="td tc">${isSame || !checkOut ? '<span style="color:#94a3b8;font-style:italic;font-size:10px;">Belum Absen</span>' : formatTime(r.jam_keluar)}</td>
+          <td class="td tc">${r.leave_type ? '-' : isSame || !checkOut ? '<span style="color:#94a3b8;font-style:italic;font-size:10px;">Belum Absen</span>' : formatTime(r.jam_keluar)}</td>
           <td class="td tc" style="color:#475569;">${durStr}</td>
           <td class="td tc">
-            <span style="background:${sBg};color:${sColor};padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;white-space:nowrap;">${status}</span>
+            <span title="${escapeHtml(r.leave_reason || '')}" style="background:${sBg};color:${sColor};padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;white-space:nowrap;">${escapeHtml(status)}</span>
           </td>
         </tr>`;
     }).join('');

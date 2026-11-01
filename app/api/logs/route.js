@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { getUserSession } from '@/lib/auth';
+import { getUserSession, isDepartmentManager } from '@/lib/auth';
 import { requireDevice } from '@/lib/devices';
 
 const sortableColumns = {
@@ -16,6 +16,7 @@ export async function GET(request) {
   try {
     const user = await getUserSession(request);
     if (!user) return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
+    if (isDepartmentManager(user.role) && !user.department?.trim()) return NextResponse.json({ error: 'Akun belum memiliki departemen.' }, { status: 403 });
 
     const searchParams = new URL(request.url).searchParams;
     const device = await requireDevice(searchParams);
@@ -28,7 +29,7 @@ export async function GET(request) {
     const offset = (page - 1) * limit;
     const orderColumn = sortableColumns[searchParams.get('sortCol')] || sortableColumns.date;
     const orderDirection = String(searchParams.get('sortDir') || 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-    const department = user.role === 'manager' && user.department ? user.department : null;
+    const department = isDepartmentManager(user.role) ? user.department : null;
     const employeeUid = Number.parseInt(searchParams.get('employee_uid') || '', 10);
 
     // 1. Kondisi untuk attendance_logs
@@ -36,7 +37,7 @@ export async function GET(request) {
     const attParams = [device.id];
     if (date) { attConditions.push('DATE(a.timestamp) = ?'); attParams.push(date); }
     else if (dateFrom && dateTo) { attConditions.push('DATE(a.timestamp) BETWEEN ? AND ?'); attParams.push(dateFrom, dateTo); }
-    else attConditions.push('DATE(a.timestamp) = CURDATE()');
+    else attConditions.push('DATE(a.timestamp) = DATE(UTC_TIMESTAMP() + INTERVAL 7 HOUR)');
     if (department) { attConditions.push('e.department = ?'); attParams.push(department); }
     if (search) {
       attConditions.push('(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)');
@@ -50,7 +51,7 @@ export async function GET(request) {
     const leaveParams = [device.id];
     if (date) { leaveConditions.push('l.date = ?'); leaveParams.push(date); }
     else if (dateFrom && dateTo) { leaveConditions.push('l.date BETWEEN ? AND ?'); leaveParams.push(dateFrom, dateTo); }
-    else leaveConditions.push('l.date = CURDATE()');
+    else leaveConditions.push('l.date = DATE(UTC_TIMESTAMP() + INTERVAL 7 HOUR)');
     if (department) { leaveConditions.push('e.department = ?'); leaveParams.push(department); }
     if (search) {
       leaveConditions.push('(e.name LIKE ? OR CAST(l.uid AS CHAR) = ? OR l.type LIKE ?)');
@@ -82,9 +83,9 @@ export async function GET(request) {
 
     const combinedSubquery = `
       SELECT DATE(a.timestamp) AS date,
-             a.uid AS device_uid,
-             de.employee_uid AS employee_uid,
-             COALESCE(e.name, de.display_name) AS name,
+             MIN(a.uid) AS device_uid,
+             MAX(de.employee_uid) AS employee_uid,
+             COALESCE(MAX(e.name), MAX(de.display_name)) AS name,
              COALESCE(e.department, '') AS department,
              MIN(a.timestamp) AS check_in,
              MAX(a.timestamp) AS check_out,
@@ -95,7 +96,7 @@ export async function GET(request) {
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
       LEFT JOIN employees e ON e.uid = de.employee_uid
       ${attWhere}
-      GROUP BY DATE(a.timestamp), a.uid, e.name, de.display_name, e.department
+      GROUP BY DATE(a.timestamp), COALESCE(CAST(de.employee_uid AS CHAR), CONCAT('device:', a.uid)), e.name, e.department
 
       UNION ALL
 
@@ -112,12 +113,13 @@ export async function GET(request) {
       FROM leaves l
       LEFT JOIN employees e ON e.uid = l.uid
       ${leaveWhere}
+      AND l.id = (SELECT MAX(l2.id) FROM leaves l2 WHERE l2.device_id = l.device_id AND l2.uid = l.uid AND l2.date = l.date)
       AND NOT EXISTS (
         SELECT 1 FROM attendance_logs a2
         LEFT JOIN device_enrollments de2 ON de2.device_id = a2.device_id AND de2.device_uid = a2.uid
         WHERE a2.device_id = l.device_id
           AND DATE(a2.timestamp) = l.date
-          AND COALESCE(de2.employee_uid, a2.uid) = l.uid
+          AND de2.employee_uid = l.uid
       )
     `;
 
@@ -140,8 +142,8 @@ export async function GET(request) {
       FROM attendance_logs a
       LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
       LEFT JOIN employees e ON e.uid = de.employee_uid
-      WHERE a.device_id = ? AND DATE(a.timestamp) = CURDATE()
-    `, [device.id]);
+      WHERE a.device_id = ? AND DATE(a.timestamp) = DATE(UTC_TIMESTAMP() + INTERVAL 7 HOUR)${department ? ' AND e.department = ?' : ''}
+    `, department ? [device.id, department] : [device.id]);
 
     const missingDepartment = department ? 'AND e.department = ?' : '';
     const missingParams = [date || null, date || null, device.id];
@@ -156,11 +158,12 @@ export async function GET(request) {
       LEFT JOIN leaves l
         ON l.device_id = de.device_id
        AND l.uid = e.uid
-       AND l.date = COALESCE(?, CURDATE())
+       AND l.date = COALESCE(?, DATE(UTC_TIMESTAMP() + INTERVAL 7 HOUR))
+       AND l.id = (SELECT MAX(l2.id) FROM leaves l2 WHERE l2.device_id = l.device_id AND l2.uid = l.uid AND l2.date = l.date)
       LEFT JOIN attendance_logs a2
         ON a2.device_id = de.device_id
        AND a2.uid = de.device_uid
-       AND DATE(a2.timestamp) = COALESCE(?, CURDATE())
+       AND DATE(a2.timestamp) = COALESCE(?, DATE(UTC_TIMESTAMP() + INTERVAL 7 HOUR))
       WHERE de.device_id = ?
         AND de.employee_uid IS NOT NULL
         ${missingDepartment}

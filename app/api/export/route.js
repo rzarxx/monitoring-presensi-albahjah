@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import { getUserSession } from '@/lib/auth';
+import { getUserSession, isDepartmentManager } from '@/lib/auth';
 import { requireDevice } from '@/lib/devices';
+import { getAttendanceReport } from '@/lib/attendance-report';
 
 export async function GET(request) {
   try {
@@ -16,37 +16,10 @@ export async function GET(request) {
     const date_to    = searchParams.get('date_to');
     const search     = searchParams.get('search');
     const requestedDepartment = searchParams.get('department');
-    const department = user.role === 'manager' ? user.department : requestedDepartment;
-    if (user.role === 'manager' && !department) return NextResponse.json({ error: 'Akun manager belum memiliki departemen.' }, { status: 403 });
+    const department = isDepartmentManager(user.role) ? user.department : requestedDepartment;
+    if (isDepartmentManager(user.role) && !department?.trim()) return NextResponse.json({ error: 'Akun belum memiliki departemen.' }, { status: 403 });
 
-    const conditions = ['a.device_id = ?'];
-    const params = [device.id];
-
-    if (date_from)  { conditions.push(`DATE(a.timestamp) >= ?`); params.push(date_from); }
-    if (date_to)    { conditions.push(`DATE(a.timestamp) <= ?`); params.push(date_to); }
-    if (search)     { conditions.push(`(e.name LIKE ? OR de.display_name LIKE ? OR CAST(a.uid AS CHAR) = ?)`); params.push(`%${search}%`, `%${search}%`, search); }
-    if (department) { conditions.push(`e.department LIKE ?`); params.push(`%${department}%`); }
-
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    // Ambil semua data attendance dikelompokkan per karyawan per hari dengan DATE_FORMAT untuk hindari issue ONLY_FULL_GROUP_BY & timezone
-    const rows = await query(`
-      SELECT
-        DATE_FORMAT(a.timestamp, '%Y-%m-%d') AS tgl,
-        a.uid                    AS uid,
-        COALESCE(MAX(e.name), MAX(de.display_name), CONCAT('UID_', a.uid)) AS nama,
-        COALESCE(MAX(e.department), '-')              AS dept,
-        DATE_FORMAT(MIN(a.timestamp), '%H:%i')  AS jam_masuk,
-        DATE_FORMAT(MAX(a.timestamp), '%H:%i')  AS jam_keluar,
-        TIMESTAMPDIFF(MINUTE, MIN(a.timestamp), MAX(a.timestamp)) AS dur_min,
-        COUNT(a.id)              AS total_scan
-      FROM attendance_logs a
-      LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
-      LEFT JOIN employees e ON e.uid = de.employee_uid
-      ${where}
-      GROUP BY DATE_FORMAT(a.timestamp, '%Y-%m-%d'), a.uid
-      ORDER BY nama ASC, tgl ASC
-    `, params);
+    const rows = await getAttendanceReport({ deviceId: device.id, user, dateFrom: date_from, dateTo: date_to, search, department });
 
     const XLSX = (await import('xlsx')).default || await import('xlsx');
 
@@ -70,21 +43,21 @@ export async function GET(request) {
     }
 
     // Kelompokkan data per karyawan
-    const employeeMap = {};
+    const employeeMap = new Map();
     for (const r of rows) {
-      const name = r.nama;
-      if (!employeeMap[name]) employeeMap[name] = { nama: r.nama, dept: r.dept, byDate: {} };
+      if (!employeeMap.has(r.employee_key)) employeeMap.set(r.employee_key, { nama: r.nama, dept: r.dept, byDate: {} });
       const dateStr = String(r.tgl).substring(0, 10);
       const isSame   = (r.total_scan <= 1) || (r.jam_masuk === r.jam_keluar);
       const durMin   = r.dur_min || 0;
-      employeeMap[name].byDate[dateStr] = {
+      employeeMap.get(r.employee_key).byDate[dateStr] = {
         masuk : r.jam_masuk,
         keluar: isSame ? '' : r.jam_keluar,
         durMs : isSame ? 0 : (durMin * 60 * 1000),
+        status: r.leave_type,
       };
     }
 
-    const employees = Object.values(employeeMap);
+    const employees = [...employeeMap.values()];
 
     // ─── Format bulan untuk judul ────────────────────────────────────
     const MONTHS_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
@@ -224,7 +197,7 @@ export async function GET(request) {
           if (entry.masuk) totalMasuk++;
           if (entry.keluar) totalKeluar++;
           totalDurMs += (entry.durMs || 0);
-          set(R, c,   entry.masuk || '-',  { font: { sz: 9, name: 'Calibri', color: { rgb: '0B5E30' } }, fill: { patternType: 'solid', fgColor: { rgb: rowBg } }, alignment: { horizontal: 'center', vertical: 'center' }, border: { top: { style: 'thin', color: { rgb: CLR_BORDER } }, bottom: { style: 'thin', color: { rgb: CLR_BORDER } }, left: { style: 'thin', color: { rgb: CLR_BORDER } }, right: { style: 'thin', color: { rgb: CLR_BORDER } } } });
+          set(R, c,   entry.status ? (entry.status === 'Hadir' ? 'Hadir manual' : entry.status) : entry.masuk || '-',  { font: { sz: 9, name: 'Calibri', color: { rgb: '0B5E30' } }, fill: { patternType: 'solid', fgColor: { rgb: rowBg } }, alignment: { horizontal: 'center', vertical: 'center' }, border: { top: { style: 'thin', color: { rgb: CLR_BORDER } }, bottom: { style: 'thin', color: { rgb: CLR_BORDER } }, left: { style: 'thin', color: { rgb: CLR_BORDER } }, right: { style: 'thin', color: { rgb: CLR_BORDER } } } });
           set(R, c+1, entry.keluar || '-', { font: { sz: 9, name: 'Calibri', color: { rgb: entry.keluar ? '333333' : 'CC0000' } }, fill: { patternType: 'solid', fgColor: { rgb: rowBg } }, alignment: { horizontal: 'center', vertical: 'center' }, border: { top: { style: 'thin', color: { rgb: CLR_BORDER } }, bottom: { style: 'thin', color: { rgb: CLR_BORDER } }, left: { style: 'thin', color: { rgb: CLR_BORDER } }, right: { style: 'thin', color: { rgb: CLR_BORDER } } } });
         } else {
           set(R, c,   '', normalCell(rowBg));
@@ -249,7 +222,7 @@ export async function GET(request) {
 
     allDates.forEach((d, i) => {
       const c = FIXED_COLS + i * 2;
-      const hadirCount = employees.filter(emp => !!emp.byDate[d] && !!emp.byDate[d].masuk).length;
+      const hadirCount = employees.filter(emp => emp.byDate[d]?.masuk || emp.byDate[d]?.status === 'Hadir').length;
       set(R, c,   hadirCount > 0 ? hadirCount : '', normalCell('FFF3CD', true));
       set(R, c+1, '', normalCell(CLR_WHITE));
     });
@@ -267,7 +240,7 @@ export async function GET(request) {
       { wch: 14 }, // Dept
     ];
     for (let i = 0; i < allDates.length * 2; i++) {
-      colWidths.push({ wch: 7 }); // Cek-in/out
+      colWidths.push({ wch: 14 }); // Jam atau keterangan manual
     }
     colWidths.push({ wch: 14 }); // Total Jam
     colWidths.push({ wch: 11 }); // Total Masuk
