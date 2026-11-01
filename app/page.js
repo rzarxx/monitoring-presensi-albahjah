@@ -57,6 +57,7 @@ export default function Home() {
   const [chartError, setChartError] = useState("");
   const { devices, deviceId: selectedDeviceId, setDeviceId: setSelectedDeviceId } = useSelectedDevice();
   const [canSync, setCanSync] = useState(false);
+  const [canManageAttendance, setCanManageAttendance] = useState(false);
   const [syncJobId, setSyncJobId] = useState("");
 
   // Clock
@@ -74,7 +75,6 @@ export default function Home() {
   useEffect(() => {
     if (sessionStorage.getItem("showWelcome") === "true") {
       // Nilai berasal dari session browser dan hanya diterapkan saat mount.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setWelcomeModal(true);
     }
   }, []);
@@ -87,7 +87,7 @@ export default function Home() {
   useEffect(() => {
     fetch('/api/auth/me')
       .then((response) => response.ok ? response.json() : null)
-      .then((json) => setCanSync(['superadmin', 'sdm'].includes(json?.user?.role)))
+      .then((json) => { setCanSync(['superadmin', 'sdm'].includes(json?.user?.role)); setCanManageAttendance(['superadmin', 'sdm', 'manager', 'kepala_divisi', 'kepala_subdivisi'].includes(json?.user?.role)); })
       .catch(() => setCanSync(false));
   }, []);
 
@@ -160,7 +160,6 @@ export default function Home() {
   useEffect(() => {
     if (!selectedDeviceId) return;
     // Initial fetch
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchLogs();
     fetchMachineStatus();
     fetchChartData();
@@ -505,7 +504,7 @@ export default function Home() {
               <table style={{ width: "100%", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
                 <thead>
                   <tr style={{ borderBottom: "2px solid #e4efff" }}>
-                    {["Nama Pejuang", "Departemen", "Keterangan", "Catatan", ...(canSync ? ["Aksi"] : [])].map((label) => (
+                    {["Nama Pejuang", "Departemen", "Keterangan", "Catatan", ...(canManageAttendance ? ["Aksi"] : [])].map((label) => (
                       <th key={label} style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontFamily: "'JetBrains Mono', monospace", color: "var(--color-outline)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>{label}</th>
                     ))}
                   </tr>
@@ -525,7 +524,7 @@ export default function Home() {
                         )}
                       </td>
                       <td style={{ padding: "12px 14px", maxWidth: "320px", overflow: "hidden", textOverflow: "ellipsis", color: "var(--color-outline)", fontSize: "13px" }} title={employee.status_reason || ""}>{employee.status_reason || "—"}</td>
-                      {canSync && (
+                      {canManageAttendance && (
                         <td style={{ padding: "12px 14px" }}>
                           <button type="button" onClick={() => openAttendanceStatusModal(employee)}
                             style={{ padding: "7px 12px", border: "1px solid var(--color-primary)", borderRadius: "8px", background: "transparent", color: "var(--color-primary)", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
@@ -750,9 +749,11 @@ export default function Home() {
               <select id="attendance-status-type" required value={attendanceStatusModal.type}
                 onChange={(event) => setAttendanceStatusModal((current) => ({ ...current, type: event.target.value }))}
                 style={{ width: "100%", padding: "10px 12px", border: "1px solid #c3c6d6", borderRadius: "8px", color: "var(--color-on-background)", background: "var(--color-surface)" }}>
+                <option value="Hadir">Hadir (manual)</option>
                 <option value="Izin">Izin</option>
                 <option value="Sakit">Sakit</option>
                 <option value="Alfa">Alfa</option>
+                <option value="Cuti">Cuti</option>
               </select>
             </div>
             <div>

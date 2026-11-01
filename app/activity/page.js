@@ -42,6 +42,8 @@ export default function ActivityPage() {
     }
   }, [level, source]);
 
+  // Reload the external log when its filters change.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
   useRealtimeStream((event) => {

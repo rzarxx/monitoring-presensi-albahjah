@@ -30,8 +30,9 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Username wajib diisi dan password minimal 12 karakter.' }, { status: 422 });
     }
 
-    const allowedRoles = ['admin', 'superadmin', 'sdm', 'manager'];
+    const allowedRoles = ['admin', 'superadmin', 'sdm', 'manager', 'kepala_divisi', 'kepala_subdivisi'];
     const finalRole = allowedRoles.includes(role) ? role : 'admin';
+    if (['manager', 'kepala_divisi', 'kepala_subdivisi'].includes(finalRole) && (typeof department !== 'string' || !department.trim())) return NextResponse.json({ error: 'Departemen wajib diisi untuk kepala divisi atau subdivisi.' }, { status: 422 });
     
     const check = await query(`SELECT id FROM admins WHERE username = ?`, [username]);
     if (check.length > 0) {

@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { getUserSession } from '@/lib/auth';
+import { getUserSession, isDepartmentManager } from '@/lib/auth';
 import { requireDevice } from '@/lib/devices';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const pad = (n) => String(n).padStart(2, '0');
 const jakartaDateFormatter = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Asia/Jakarta',
   year: 'numeric',
@@ -18,18 +17,11 @@ const toJakartaDateKey = (value) => {
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
 };
-const toDateKey = (value) => {
-  if (!value) return '';
-  if (value instanceof Date) {
-    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
-  }
-  return String(value).slice(0, 10);
-};
-
 export async function GET(request) {
   try {
     const user = await getUserSession(request);
     if (!user) return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
+    if (isDepartmentManager(user.role) && !user.department?.trim()) return NextResponse.json({ error: 'Akun belum memiliki departemen.' }, { status: 403 });
     const searchParams = new URL(request.url).searchParams;
     const device = await requireDevice(searchParams);
     const uid = searchParams.get('uid');
@@ -47,14 +39,14 @@ export async function GET(request) {
       conditions.push('a.uid = ?');
       params.push(uid);
     }
-    if (user.role === 'manager' && user.department) {
+    if (isDepartmentManager(user.role)) {
       conditions.push('e.department = ?');
       params.push(user.department);
     }
     const perPerson = Number.isInteger(employeeUid) || Boolean(uid);
     const rows = await query(
       `SELECT DATE_FORMAT(a.timestamp, '%Y-%m-%d') AS date,
-              ${perPerson ? 'COUNT(a.uid)' : "COUNT(DISTINCT COALESCE(CAST(de.employee_uid AS CHAR), CONCAT('device:', a.uid)))"} AS hadir
+              ${perPerson ? '1' : "COUNT(DISTINCT COALESCE(CAST(de.employee_uid AS CHAR), CONCAT('device:', a.uid)))"} AS hadir
        FROM attendance_logs a
        LEFT JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
        LEFT JOIN employees e ON e.uid = de.employee_uid
@@ -69,15 +61,16 @@ export async function GET(request) {
       leaveConditions.push('l.uid = ?');
       leaveParams.push(employeeUid);
     } else if (uid) {
-      leaveConditions.push('l.uid = ?');
-      leaveParams.push(uid);
+      leaveConditions.push('l.uid IN (SELECT employee_uid FROM device_enrollments WHERE device_id = ? AND device_uid = ?)');
+      leaveParams.push(device.id, uid);
     }
-    if (user.role === 'manager' && user.department) {
+    if (isDepartmentManager(user.role)) {
       leaveConditions.push('e.department = ?');
       leaveParams.push(user.department);
     }
     const leaveRows = await query(
       `SELECT DATE_FORMAT(l.date, '%Y-%m-%d') AS date,
+              SUM(CASE WHEN l.type = 'Hadir' THEN 1 ELSE 0 END) AS hadir,
               SUM(CASE WHEN l.type = 'Izin' THEN 1 ELSE 0 END) AS izin,
               SUM(CASE WHEN l.type = 'Sakit' THEN 1 ELSE 0 END) AS sakit,
               SUM(CASE WHEN l.type = 'Cuti' THEN 1 ELSE 0 END) AS cuti,
@@ -85,6 +78,7 @@ export async function GET(request) {
        FROM leaves l
        JOIN employees e ON e.uid = l.uid
        WHERE ${leaveConditions.join(' AND ')}
+         AND l.id = (SELECT MAX(l2.id) FROM leaves l2 WHERE l2.device_id = l.device_id AND l2.uid = l.uid AND l2.date = l.date)
          AND NOT EXISTS (
            SELECT 1
            FROM attendance_logs a2
@@ -101,11 +95,11 @@ export async function GET(request) {
 
     return NextResponse.json({
       data: dates.map((date) => {
-        const att = rows.find((row) => toDateKey(row.date) === date);
-        const lv = leaveRows.find((row) => toDateKey(row.date) === date);
+        const att = rows.find((row) => row.date === date);
+        const lv = leaveRows.find((row) => row.date === date);
         return {
           date,
-          hadir: Number(att?.hadir || 0),
+          hadir: Number(att?.hadir || 0) + Number(lv?.hadir || 0),
           izin: Number(lv?.izin || 0),
           sakit: Number(lv?.sakit || 0),
           cuti: Number(lv?.cuti || 0),

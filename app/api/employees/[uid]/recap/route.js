@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { getUserSession } from '@/lib/auth';
+import { getUserSession, isDepartmentManager } from '@/lib/auth';
 import { requireDevice } from '@/lib/devices';
 
 const jakartaFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -31,6 +31,7 @@ export async function GET(request, context) {
   try {
     const user = await getUserSession(request);
     if (!user) return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
+    if (isDepartmentManager(user.role) && !user.department?.trim()) return NextResponse.json({ error: 'Akun belum memiliki departemen.' }, { status: 403 });
 
     const { uid: rawUid } = await context.params;
     const uid = Number.parseInt(rawUid, 10);
@@ -40,34 +41,40 @@ export async function GET(request, context) {
     const period = params.get('period') === 'monthly' ? 'monthly' : 'weekly';
     const device = await requireDevice(params);
     const employees = await query(
-      `SELECT uid, name, COALESCE(department, '') AS department FROM employees WHERE uid = ?${user.role === 'manager' && user.department ? ' AND department = ?' : ''}`,
-      user.role === 'manager' && user.department ? [uid, user.department] : [uid]
+      `SELECT uid, name, COALESCE(department, '') AS department FROM employees WHERE uid = ?${isDepartmentManager(user.role) ? ' AND department = ?' : ''}`,
+      isDepartmentManager(user.role) ? [uid, user.department] : [uid]
     );
     if (!employees[0]) return NextResponse.json({ error: 'Pejuang tidak ditemukan atau di luar akses Anda.' }, { status: 404 });
 
     const range = dateRange(period);
     const attendance = await query(`
-      SELECT DATE(a.timestamp) AS date, COUNT(*) AS scan_count
+      SELECT DATE_FORMAT(a.timestamp, '%Y-%m-%d') AS date, COUNT(*) AS scan_count,
+             DATE_FORMAT(MIN(a.timestamp), '%H:%i') AS check_in,
+             CASE WHEN MIN(a.timestamp) < MAX(a.timestamp) THEN DATE_FORMAT(MAX(a.timestamp), '%H:%i') ELSE NULL END AS check_out
       FROM attendance_logs a
       JOIN device_enrollments de ON de.device_id = a.device_id AND de.device_uid = a.uid
       WHERE a.device_id = ? AND de.employee_uid = ? AND DATE(a.timestamp) BETWEEN ? AND ?
-      GROUP BY DATE(a.timestamp)
+      GROUP BY DATE_FORMAT(a.timestamp, '%Y-%m-%d')
     `, [device.id, uid, range.from, range.to]);
     const leaves = await query(`
       SELECT DATE_FORMAT(date, '%Y-%m-%d') AS date, type, reason
       FROM leaves
       WHERE device_id = ? AND uid = ? AND date BETWEEN ? AND ?
+      ORDER BY id ASC
     `, [device.id, uid, range.from, range.to]);
 
-    const byDate = new Map(attendance.map((row) => [String(row.date).slice(0, 10), Number(row.scan_count)]));
+    const byDate = new Map(attendance.map((row) => [row.date, row]));
     const leaveByDate = new Map(leaves.map((row) => [String(row.date).slice(0, 10), row]));
     const daily = range.dates.map((date) => {
-      const scanCount = byDate.get(date) || 0;
+      const scans = byDate.get(date);
+      const scanCount = Number(scans?.scan_count || 0);
       const leave = leaveByDate.get(date);
       return {
         date,
         status: scanCount ? 'Hadir' : leave?.type || 'Belum tercatat',
         scan_count: scanCount,
+        check_in: scans?.check_in || null,
+        check_out: scans?.check_out || null,
         reason: scanCount ? '' : leave?.reason || '',
       };
     });

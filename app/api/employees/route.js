@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { getUserSession } from '@/lib/auth';
+import { getUserSession, isDepartmentManager } from '@/lib/auth';
 import { findDevice, parseDeviceId } from '@/lib/devices';
 import { allocateEmployeeUids, autoLinkEnrollments, setEnrollmentLink } from '@/lib/enrollments';
 import { sameName } from '@/lib/names';
@@ -20,7 +20,8 @@ export async function GET(request) {
   try {
     const user = await getUserSession(request);
     if (!user) return NextResponse.json({ error: 'Akses ditolak.' }, { status: 401 });
-    const departmentFilter = (user.role === 'manager' && user.department) ? user.department : null;
+    if (isDepartmentManager(user.role) && !user.department?.trim()) return NextResponse.json({ error: 'Akun belum memiliki departemen.' }, { status: 403 });
+    const departmentFilter = isDepartmentManager(user.role) ? user.department : null;
 
     const requestedDevice = new URL(request.url).searchParams.get('device_id');
     let device = null;
@@ -30,7 +31,7 @@ export async function GET(request) {
     }
 
     const [allEmployees, enrollments] = await Promise.all([
-      query(`SELECT * FROM employees ORDER BY name ASC`),
+      query(`SELECT * FROM employees${departmentFilter ? ' WHERE department = ?' : ''} ORDER BY name ASC`, departmentFilter ? [departmentFilter] : []),
       listEnrollments(device?.id),
     ]);
     const employeesByUid = new Map(allEmployees.map((employee) => [employee.uid, employee]));
@@ -56,7 +57,6 @@ export async function GET(request) {
     }
 
     const employees = allEmployees
-      .filter((employee) => !departmentFilter || employee.department === departmentFilter)
       .map((employee) => ({ ...employee, devices: devicesByEmployee.get(employee.uid) || [] }))
       .filter((employee) => !device || employee.devices.length > 0);
 

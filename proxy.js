@@ -6,29 +6,22 @@ const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/cron/sync'];
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
 
-  // Izinkan akses ke path publik
-  if (PUBLIC_PATHS.includes(pathname)) {
-    return NextResponse.next();
-  }
-
   // Cookie sesi tidak boleh dipakai oleh halaman domain lain untuk memodifikasi data.
-  if (pathname.startsWith('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+  // The scheduler authenticates using its own bearer token, rather than a browser cookie.
+  if (pathname.startsWith('/api/') && pathname !== '/api/cron/sync' && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
     const origin = request.headers.get('origin');
-    const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL ? new URL(process.env.NEXT_PUBLIC_APP_URL).origin : null;
-    const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('host');
-    const forwardedProto = request.headers.get('x-forwarded-proto') || 'https';
-    const forwardedOrigin = forwardedHost ? `${forwardedProto.split(',')[0].trim()}://${forwardedHost.split(',')[0].trim()}` : null;
-    if (
-      !origin ||
-      (origin !== request.nextUrl.origin &&
-        origin !== configuredOrigin &&
-        origin !== forwardedOrigin &&
-        `https://${forwardedHost}` !== origin &&
-        `http://${forwardedHost}` !== origin)
-    ) {
+    const configuredUrl = process.env.APP_ORIGIN || process.env.NEXT_PUBLIC_APP_URL;
+    let configuredOrigin;
+    try { configuredOrigin = configuredUrl ? new URL(configuredUrl).origin : null; } catch { configuredOrigin = null; }
+    if (!configuredOrigin && process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ error: 'Konfigurasi URL aplikasi belum siap.' }, { status: 503 });
+    }
+    if (!origin || (origin !== configuredOrigin && !(process.env.NODE_ENV !== 'production' && origin === request.nextUrl.origin))) {
       return NextResponse.json({ error: 'Permintaan lintas-domain ditolak.' }, { status: 403 });
     }
   }
+
+  if (PUBLIC_PATHS.includes(pathname)) return NextResponse.next();
 
   const token = request.cookies.get('auth_token')?.value;
 
@@ -47,7 +40,8 @@ export async function proxy(request) {
 
   try {
     const secret = new TextEncoder().encode(secretValue);
-    await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, secret);
+    if (typeof payload.sessionProof !== 'string' || !/^[a-f0-9]{64}$/.test(payload.sessionProof)) throw new Error('Invalid session');
     return NextResponse.next();
   } catch (e) {
     if (pathname.startsWith('/api/')) {
@@ -63,5 +57,5 @@ export async function proxy(request) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.png$).*)'],
+  matcher: ['/api/:path*', '/((?!_next/static|_next/image|favicon.ico|.*\\.png$).*)'],
 };

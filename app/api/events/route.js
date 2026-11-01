@@ -1,4 +1,4 @@
-import { getUserSession } from '@/lib/auth';
+import { getUserSession, isDepartmentManager } from '@/lib/auth';
 import { subscribeRealtimeEvents } from '@/lib/events';
 import { ensureRealtimeMonitorStarted } from '@/lib/realtime-monitor';
 
@@ -33,8 +33,13 @@ export async function GET(request) {
       // Kirim sinyal awal bahwa SSE tersambung
       send({ type: 'connected', timestamp: Date.now() });
 
-      const unsubscribe = subscribeRealtimeEvents((event) => {
-        send(event);
+      const unsubscribe = subscribeRealtimeEvents(async (event) => {
+        const currentUser = await getUserSession(request).catch(() => null);
+        if (!currentUser) return;
+        if (isDepartmentManager(currentUser.role)) {
+          if (['attendance', 'sync', 'employees', 'leaves', 'devices'].includes(event.type)) send({ type: event.type, timestamp: event.timestamp });
+          else if (event.type === 'machine_status') send({ type: event.type, device_id: event.device_id, online: event.online });
+        } else send(event);
       });
 
       // Heartbeat setiap 15 detik agar proxy/nginx tidak memutus koneksi SSE

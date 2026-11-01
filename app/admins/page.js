@@ -7,6 +7,7 @@ import { useRealtimeStream } from "@/app/components/useRealtimeStream";
 
 export default function Admins() {
   const [admins, setAdmins] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ open: false, mode: 'add', data: null });
   const [formData, setFormData] = useState({ username: '', password: '', role: 'admin', department: '' });
@@ -17,6 +18,9 @@ export default function Admins() {
 
   useEffect(() => {
     fetchAdmins();
+    fetch('/api/employees').then((response) => response.ok ? response.json() : null).then((result) => {
+      setDepartments([...new Set((result?.data || []).map((employee) => employee.department).filter(Boolean))].sort());
+    }).catch(() => setDepartments([]));
   }, []);
 
   useRealtimeStream((event) => {
@@ -208,8 +212,9 @@ export default function Admins() {
                           : 'var(--color-secondary)',
                         borderRadius: "20px", fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em"
                       }}>
-                        {admin.role === 'superadmin' ? 'Super Admin' : admin.role === 'sdm' ? 'SDM' : 'Admin'}
+                        {({ superadmin: 'Super Admin', sdm: 'SDM', manager: 'Manager', kepala_divisi: 'Kepala Divisi', kepala_subdivisi: 'Kepala Subdivisi' })[admin.role] || 'Admin'}
                       </span>
+                      {admin.department && <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--color-outline)' }}>{admin.department}</div>}
                     </td>
                     <td style={{ padding: "16px", fontSize: "14px", color: "var(--color-on-surface-variant)" }}>{new Date(admin.created_at).toLocaleDateString('id-ID')}</td>
                     <td style={{ padding: "16px", textAlign: "right" }}>
@@ -254,10 +259,19 @@ export default function Admins() {
               style={{ width: "100%", padding: "10px 14px", border: "1.5px solid var(--color-outline-variant)", borderRadius: "8px", fontSize: "14px", outline: "none", background: "var(--color-surface)" }}>
               <option value="admin">Admin (Monitoring saja)</option>
               <option value="sdm">SDM (Monitoring Full - Tanpa Kelola Admin)</option>
-              <option value="manager">Manager (Data Departemen Sendiri)</option>
+              <option value="manager">Manager (departemen sendiri)</option>
+              <option value="kepala_divisi">Kepala divisi (departemen sendiri)</option>
+              <option value="kepala_subdivisi">Kepala subdivisi (departemen sendiri)</option>
               <option value="superadmin">Super Admin (Akses Penuh)</option>
             </select>
           </div>
+          {['manager', 'kepala_divisi', 'kepala_subdivisi'].includes(formData.role) && <div>
+            <label htmlFor="admin-department" style={{ display: 'block', marginBottom: '6px', fontSize: '12px', fontWeight: 600 }}>Departemen</label>
+            <input id="admin-department" list="admin-departments" required value={formData.department} onChange={e => setFormData({ ...formData, department: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1.5px solid var(--color-outline-variant)', borderRadius: '8px', background: 'var(--color-surface)' }} />
+            <datalist id="admin-departments">{departments.map((department) => <option key={department} value={department} />)}</datalist>
+            <small>Gunakan nama departemen yang sama dengan data pejuang.</small>
+          </div>}
+          {alertMsg?.type === 'error' && <p role="alert" style={{ margin: 0, color: 'var(--color-error)', fontSize: '13px' }}>{alertMsg.text}</p>}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
             <button type="button" onClick={() => setModal({ ...modal, open: false })} style={{ padding: "10px 18px", border: "1px solid var(--color-outline-variant)", borderRadius: "8px", background: "var(--color-surface-container-lowest)", fontSize: "14px", fontWeight: 600, cursor: "pointer", color: "var(--color-on-background)" }}>Batal</button>
             <button type="submit" style={{ padding: "10px 18px", background: "var(--color-primary)", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: 600, color: "var(--color-on-primary)", cursor: "pointer" }}>Simpan</button>

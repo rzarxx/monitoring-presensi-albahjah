@@ -60,6 +60,12 @@ Dashboard web untuk memantau presensi karyawan dari mesin sidik jari ZKTeco. Apl
 
    > Peringatan: perintah ini menghapus tabel `admins`, `employees`, `attendance_logs`, dan `leaves` pada database yang dikonfigurasi. Gunakan hanya pada database baru atau setelah backup terverifikasi.
 
+   Siapkan tabel pembatas login tanpa menghapus data:
+
+   ```bash
+   npm run migrate:auth-security
+   ```
+
 5. Jalankan mode pengembangan.
 
    ```bash
@@ -104,6 +110,7 @@ Jangan mengubah firmware atau menghapus data mesin untuk mengatasi koneksi. Uji 
 | `ADMIN_USER`, `ADMIN_PASSWORD` | Akun bootstrap saat tabel admin belum berisi data. Gunakan nilai yang kuat. |
 | `JWT_SECRET` | Kunci penandatanganan sesi JWT; wajib unik dan rahasia. |
 | `NEXT_PUBLIC_APP_URL` | URL publik aplikasi, misalnya `https://absensi.example.org`. Nilai ini dipakai saat build untuk metadata publik. |
+| `APP_ORIGIN` | Origin HTTPS publik yang diizinkan untuk permintaan browser yang mengubah data, misalnya `https://absensi.example.org`. Harus cocok dengan alamat yang dipakai pengguna; header proxy tidak menentukan origin tepercaya. |
 | `SYNC_CRON_TOKEN` | Token rahasia khusus cron server untuk memulai sinkronisasi incremental. Jangan gunakan atau ekspos sebagai token pengguna. |
 
 ## Cara menggunakan
@@ -164,7 +171,12 @@ Lakukan hard refresh pada browser setelah deploy agar aset lama dari cache tidak
 
 ## Keamanan operasional
 
+- Sebelum menjalankan versi baru, jalankan `npm run migrate:auth-security` pada database aplikasi dan atur `APP_ORIGIN`. Login mengembalikan 503 sampai tabel proteksi tersedia; konfigurasi origin produksi yang salah juga menolak perubahan data. Jalankan migrasi sebelum mengganti proses aplikasi dan pastikan hak database aplikasi dapat membaca dan menulis tabel tersebut.
+- Setelah pembaruan, seluruh pengguna perlu masuk kembali. Reset atau perubahan password membatalkan sesi akun yang sudah diterbitkan.
+- Proteksi aplikasi membatasi 10 percobaan login per akun dalam 15 menit dan disimpan bersama di MySQL. Akun dapat sementara terkunci oleh percobaan orang lain. Tambahkan pembatasan per IP pada reverse proxy atau penyedia edge untuk membatasi percobaan terhadap banyak akun sekaligus; jangan mempercayai header IP yang dapat dikirim langsung oleh klien.
+- Periksa bahwa reverse proxy menghapus header `X-Forwarded-*` dari klien dan mengatur nilainya sendiri, hanya menerima host publik yang sah, serta meneruskan HTTPS ke aplikasi. Uji login dan perubahan data melalui domain publik sebelum membuka akses kembali.
 - Simpan semua kredensial hanya di `.env`; file tersebut sengaja diabaikan Git.
+- Paket SheetJS untuk ekspor disimpan sebagai `vendor/xlsx-0.20.3.tgz` dari CDN resmi agar instalasi memakai versi yang diperbaiki dan tidak bergantung pada CDN saat build. Periksa advisori SheetJS secara berkala karena versi baru tidak dipublikasikan ke registry npm.
 - Gunakan `JWT_SECRET` acak yang panjang dan ganti akun bootstrap sebelum aplikasi dipakai.
 - Pastikan aplikasi memakai HTTPS. Cookie sesi production harus diamankan pada konfigurasi deployment.
 - Jangan menjalankan `scripts/init-db.js` pada database production tanpa backup yang dapat dipulihkan.

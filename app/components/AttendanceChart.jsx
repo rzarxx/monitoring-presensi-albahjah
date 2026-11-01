@@ -13,7 +13,7 @@ export default function AttendanceChart({ data }) {
 
   // Format data for chart
   const chartData = data.map(item => {
-    const date = item.date ? new Date(item.date) : null;
+    const date = item.date ? new Date(`${item.date}T00:00:00Z`) : null;
     return {
       ...item,
       Hadir: item.hadir,
@@ -22,7 +22,7 @@ export default function AttendanceChart({ data }) {
       Cuti: item.cuti,
       Alfa: item.alfa,
       dateLabel: date && !Number.isNaN(date.getTime())
-        ? date.toLocaleDateString("id-ID", { day: "2-digit", month: "short" })
+        ? date.toLocaleDateString("id-ID", { timeZone: "UTC", day: "2-digit", month: "short" })
         : "—",
     };
   });
