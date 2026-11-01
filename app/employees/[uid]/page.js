@@ -21,6 +21,7 @@ export default function EmployeeProfile() {
   const [chartData, setChartData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [canManageAttendance, setCanManageAttendance] = useState(false);
+  const [canRecordManualPresence, setCanRecordManualPresence] = useState(false);
   const [absenceModal, setAbsenceModal] = useState({ open: false, type: "Izin", date: todayInJakarta(), reason: "", error: "" });
   const [isSavingAbsence, setIsSavingAbsence] = useState(false);
   const [period, setPeriod] = useState("weekly");
@@ -30,7 +31,7 @@ export default function EmployeeProfile() {
   useEffect(() => {
     fetch("/api/auth/me")
       .then((response) => response.ok ? response.json() : null)
-      .then((json) => setCanManageAttendance(["superadmin", "sdm", "manager", "kepala_divisi", "kepala_subdivisi"].includes(json?.user?.role)))
+      .then((json) => { setCanManageAttendance(["superadmin", "sdm", "manager", "kepala_divisi", "kepala_subdivisi"].includes(json?.user?.role)); setCanRecordManualPresence(json?.user?.role === "superadmin"); })
       .catch(() => setCanManageAttendance(false));
   }, []);
 
@@ -62,7 +63,7 @@ export default function EmployeeProfile() {
       const res = await fetch(`/api/leaves?device_id=${encodeURIComponent(deviceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid, date: absenceModal.date, type: absenceModal.type, reason: absenceModal.reason }),
+        body: JSON.stringify({ uid, date: absenceModal.date, type: absenceModal.type, reason: absenceModal.reason, check_in: absenceModal.checkIn, check_out: absenceModal.checkOut }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || "Keterangan gagal disimpan.");
@@ -227,7 +228,11 @@ export default function EmployeeProfile() {
       <Modal isOpen={absenceModal.open} onClose={() => setAbsenceModal({ open: false, type: "Izin", date: todayInJakarta(), reason: "", error: "" })} title="Keterangan Kehadiran" size="sm">
         <form onSubmit={saveAbsence} style={{ display: "grid", gap: "14px" }}>
           <label>Tanggal<input required type="date" value={absenceModal.date} onChange={(event) => setAbsenceModal((current) => ({ ...current, date: event.target.value }))} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px", boxSizing: "border-box" }} /></label>
-          <label>Keterangan<select value={absenceModal.type} onChange={(event) => setAbsenceModal((current) => ({ ...current, type: event.target.value }))} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px" }}><option>Hadir</option><option>Izin</option><option>Sakit</option><option>Alfa</option><option>Cuti</option></select></label>
+          <label>Keterangan<select value={absenceModal.type} onChange={(event) => setAbsenceModal((current) => ({ ...current, type: event.target.value }))} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px" }}>{canRecordManualPresence && <option>Hadir</option>}<option>Izin</option><option>Sakit</option><option>Alfa</option><option>Cuti</option></select></label>
+          {absenceModal.type === 'Hadir' && canRecordManualPresence && <>
+            <label>Jam masuk (WIB)<input required type="time" value={absenceModal.checkIn || ''} onChange={(event) => setAbsenceModal((current) => ({ ...current, checkIn: event.target.value }))} style={{ display: "block", width: "100%", padding: "8px" }} /></label>
+            <label>Jam keluar (WIB, opsional)<input type="time" value={absenceModal.checkOut || ''} onChange={(event) => setAbsenceModal((current) => ({ ...current, checkOut: event.target.value }))} style={{ display: "block", width: "100%", padding: "8px" }} /></label>
+          </>}
           <label>Catatan<textarea value={absenceModal.reason} onChange={(event) => setAbsenceModal((current) => ({ ...current, reason: event.target.value }))} maxLength={1000} rows={3} style={{ display: "block", width: "100%", marginTop: "6px", padding: "8px", boxSizing: "border-box" }} /></label>
           {absenceModal.error && <p style={{ margin: 0, color: "var(--color-error)" }}>{absenceModal.error}</p>}
           <button disabled={isSavingAbsence} type="submit" style={{ padding: "10px", border: "none", borderRadius: "8px", background: "var(--color-primary)", color: "var(--color-on-primary)", fontWeight: 700, cursor: "pointer" }}>{isSavingAbsence ? "Menyimpan..." : "Simpan Keterangan"}</button>

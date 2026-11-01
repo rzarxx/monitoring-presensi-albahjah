@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-async function createRoute({ user, employee = { uid: 7, department: 'Teknik', deviceId: 2 }, scans = false } = {}) {
+async function createRoute({ user, employee = { uid: 7, department: 'Teknik', deviceId: 2 }, scans = false, existing = [] } = {}) {
   const calls = [];
   const connection = {
     async beginTransaction() { calls.push('begin'); },
@@ -17,7 +17,7 @@ async function createRoute({ user, employee = { uid: 7, department: 'Teknik', de
         return [matches ? [{ uid: employee.uid }] : []];
       }
       if (sql.includes('FROM attendance_logs')) return [scans ? [{ id: 1 }] : []];
-      if (sql.startsWith('SELECT id FROM leaves')) return [[]];
+      if (sql.startsWith('SELECT id, type FROM leaves')) return [existing];
       if (sql.startsWith('INSERT INTO leaves')) { calls.push({ insert: params }); return [{ affectedRows: 1 }]; }
       throw new Error(`Unexpected SQL: ${sql}`);
     },
@@ -40,9 +40,26 @@ async function createRoute({ user, employee = { uid: 7, department: 'Teknik', de
   return { post: routeModule.namespace.POST, calls };
 }
 
-function request(uid = 7, date = '2026-10-30', deviceId = 2) {
-  return { url: `http://localhost/api/leaves?device_id=${deviceId}`, json: async () => ({ uid, date, type: 'Alfa' }) };
+function request(uid = 7, date = '2026-10-30', deviceId = 2, type = 'Alfa', check_in = '08:00', check_out = '16:00') {
+  return { url: `http://localhost/api/leaves?device_id=${deviceId}`, json: async () => ({ uid, date, type, check_in, check_out }) };
 }
+
+test('hanya Super Admin dapat mencatat atau mengubah hadir manual', async () => {
+  for (const role of ['admin', 'sdm', 'manager', 'kepala_divisi', 'kepala_subdivisi']) {
+    const route = await createRoute({ user: { role, department: 'Teknik' } });
+    assert.equal((await route.post(request(7, '2026-10-30', 2, 'Hadir'))).status, 403);
+    assert.ok(!route.calls.includes('commit'));
+    if (role !== 'admin') {
+      const withPresence = await createRoute({ user: { role, department: 'Teknik' }, existing: [{ id: 1, type: 'Hadir' }] });
+      assert.equal((await withPresence.post(request())).status, 403);
+      assert.ok(withPresence.calls.includes('rollback'));
+    }
+  }
+  const superadmin = await createRoute({ user: { role: 'superadmin' } });
+  assert.equal((await superadmin.post(request(7, '2026-10-30', 2, 'Hadir'))).status, 200);
+  assert.equal((await superadmin.post(request(7, '2026-10-30', 2, 'Hadir', '', ''))).status, 422);
+  assert.equal((await superadmin.post(request(7, '2026-10-30', 2, 'Hadir', '16:00', '08:00'))).status, 422);
+});
 
 test('kepala hanya dapat menyimpan status anggota departemen dan mesin sendiri', async () => {
   for (const role of ['manager', 'kepala_divisi', 'kepala_subdivisi']) {

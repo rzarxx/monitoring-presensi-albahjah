@@ -57,7 +57,9 @@ export async function GET(request, context) {
       GROUP BY DATE_FORMAT(a.timestamp, '%Y-%m-%d')
     `, [device.id, uid, range.from, range.to]);
     const leaves = await query(`
-      SELECT DATE_FORMAT(date, '%Y-%m-%d') AS date, type, reason
+      SELECT DATE_FORMAT(date, '%Y-%m-%d') AS date, type, reason,
+             DATE_FORMAT(manual_check_in, '%H:%i') AS manual_check_in,
+             DATE_FORMAT(manual_check_out, '%H:%i') AS manual_check_out
       FROM leaves
       WHERE device_id = ? AND uid = ? AND date BETWEEN ? AND ?
       ORDER BY id ASC
@@ -73,8 +75,8 @@ export async function GET(request, context) {
         date,
         status: scanCount ? 'Hadir' : leave?.type || 'Belum tercatat',
         scan_count: scanCount,
-        check_in: scans?.check_in || null,
-        check_out: scans?.check_out || null,
+        check_in: scans?.check_in || (leave?.type === 'Hadir' ? leave.manual_check_in : null) || null,
+        check_out: scans?.check_out || (leave?.type === 'Hadir' ? leave.manual_check_out : null) || null,
         reason: scanCount ? '' : leave?.reason || '',
       };
     });

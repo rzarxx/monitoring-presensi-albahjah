@@ -47,7 +47,7 @@ export async function GET(request) {
     for (const r of rows) {
       if (!employeeMap.has(r.employee_key)) employeeMap.set(r.employee_key, { nama: r.nama, dept: r.dept, byDate: {} });
       const dateStr = String(r.tgl).substring(0, 10);
-      const isSame   = (r.total_scan <= 1) || (r.jam_masuk === r.jam_keluar);
+      const isSame   = !r.jam_keluar || (r.jam_masuk === r.jam_keluar);
       const durMin   = r.dur_min || 0;
       employeeMap.get(r.employee_key).byDate[dateStr] = {
         masuk : r.jam_masuk,
@@ -197,7 +197,7 @@ export async function GET(request) {
           if (entry.masuk) totalMasuk++;
           if (entry.keluar) totalKeluar++;
           totalDurMs += (entry.durMs || 0);
-          set(R, c,   entry.status ? (entry.status === 'Hadir' ? 'Hadir manual' : entry.status) : entry.masuk || '-',  { font: { sz: 9, name: 'Calibri', color: { rgb: '0B5E30' } }, fill: { patternType: 'solid', fgColor: { rgb: rowBg } }, alignment: { horizontal: 'center', vertical: 'center' }, border: { top: { style: 'thin', color: { rgb: CLR_BORDER } }, bottom: { style: 'thin', color: { rgb: CLR_BORDER } }, left: { style: 'thin', color: { rgb: CLR_BORDER } }, right: { style: 'thin', color: { rgb: CLR_BORDER } } } });
+          set(R, c,   entry.status === 'Hadir' ? (entry.masuk ? `${entry.masuk} (manual)` : 'Hadir manual') : entry.status || entry.masuk || '-',  { font: { sz: 9, name: 'Calibri', color: { rgb: '0B5E30' } }, fill: { patternType: 'solid', fgColor: { rgb: rowBg } }, alignment: { horizontal: 'center', vertical: 'center' }, border: { top: { style: 'thin', color: { rgb: CLR_BORDER } }, bottom: { style: 'thin', color: { rgb: CLR_BORDER } }, left: { style: 'thin', color: { rgb: CLR_BORDER } }, right: { style: 'thin', color: { rgb: CLR_BORDER } } } });
           set(R, c+1, entry.keluar || '-', { font: { sz: 9, name: 'Calibri', color: { rgb: entry.keluar ? '333333' : 'CC0000' } }, fill: { patternType: 'solid', fgColor: { rgb: rowBg } }, alignment: { horizontal: 'center', vertical: 'center' }, border: { top: { style: 'thin', color: { rgb: CLR_BORDER } }, bottom: { style: 'thin', color: { rgb: CLR_BORDER } }, left: { style: 'thin', color: { rgb: CLR_BORDER } }, right: { style: 'thin', color: { rgb: CLR_BORDER } } } });
         } else {
           set(R, c,   '', normalCell(rowBg));

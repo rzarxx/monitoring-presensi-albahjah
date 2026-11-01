@@ -42,9 +42,10 @@ export async function GET(request) {
       : date_to   ? `Sampai ${date_to}`
       : 'Semua Periode';
 
-    const totalHadir = rows.filter(r => !r.leave_type && r.total_scan > 1 && Number(r.dur_min) >= 420).length;
-    const totalMasukSaja = rows.filter(r => !r.leave_type && (r.total_scan <= 1 || r.jam_masuk === r.jam_keluar)).length;
-    const totalKurang = rows.filter(r => !r.leave_type && r.total_scan > 1 && r.jam_masuk !== r.jam_keluar && Number(r.dur_min) < 420).length;
+    const present = (r) => !r.leave_type || r.leave_type === 'Hadir';
+    const totalHadir = rows.filter(r => present(r) && r.jam_masuk && r.jam_keluar && r.jam_masuk !== r.jam_keluar && Number(r.dur_min) >= 420).length;
+    const totalMasukSaja = rows.filter(r => present(r) && r.jam_masuk && (!r.jam_keluar || r.jam_masuk === r.jam_keluar)).length;
+    const totalKurang = rows.filter(r => present(r) && r.jam_masuk && r.jam_keluar && r.jam_masuk !== r.jam_keluar && Number(r.dur_min) < 420).length;
 
     const tableRows = rows.map((r, i) => {
       const checkIn = r.jam_masuk;
@@ -52,7 +53,7 @@ export async function GET(request) {
       const isSame = checkIn && checkOut && checkIn === checkOut;
       const durHr = Math.floor(Number(r.dur_min || 0) / 60);
       const durMin = Number(r.dur_min || 0) % 60;
-      const durStr   = isSame || !checkIn ? '-' : `${durHr}j ${durMin}m`;
+      const durStr   = isSame || !checkIn || !checkOut ? '-' : `${durHr}j ${durMin}m`;
       const status = r.leave_type ? (r.leave_type === 'Hadir' ? 'Hadir manual' : r.leave_type) : isSame ? 'Masuk Saja' : durHr >= 7 ? 'Hadir Penuh' : checkIn ? 'Kurang Jam' : '-';
       const sBg      = isSame ? '#fef9c3' : durHr >= 7 ? '#dcfce7' : durHr > 0 ? '#fee2e2' : '#f1f5f9';
       const sColor   = isSame ? '#854d0e' : durHr >= 7 ? '#166534' : durHr > 0 ? '#991b1b' : '#64748b';
@@ -64,7 +65,7 @@ export async function GET(request) {
           <td class="td" style="font-weight:700;color:#0f172a;">${escapeHtml(r.nama)}</td>
           <td class="td" style="color:#64748b;">${escapeHtml(r.dept)}</td>
           <td class="td tc" style="font-weight:700;color:#059669;">${formatTime(r.jam_masuk)}</td>
-          <td class="td tc">${r.leave_type ? '-' : isSame || !checkOut ? '<span style="color:#94a3b8;font-style:italic;font-size:10px;">Belum Absen</span>' : formatTime(r.jam_keluar)}</td>
+          <td class="td tc">${r.leave_type && r.leave_type !== 'Hadir' ? '-' : isSame || !checkOut ? '<span style="color:#94a3b8;font-style:italic;font-size:10px;">Belum Absen</span>' : formatTime(r.jam_keluar)}</td>
           <td class="td tc" style="color:#475569;">${durStr}</td>
           <td class="td tc">
             <span title="${escapeHtml(r.leave_reason || '')}" style="background:${sBg};color:${sColor};padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;white-space:nowrap;">${escapeHtml(status)}</span>

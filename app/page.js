@@ -58,6 +58,7 @@ export default function Home() {
   const { devices, deviceId: selectedDeviceId, setDeviceId: setSelectedDeviceId } = useSelectedDevice();
   const [canSync, setCanSync] = useState(false);
   const [canManageAttendance, setCanManageAttendance] = useState(false);
+  const [canRecordManualPresence, setCanRecordManualPresence] = useState(false);
   const [syncJobId, setSyncJobId] = useState("");
 
   // Clock
@@ -87,7 +88,7 @@ export default function Home() {
   useEffect(() => {
     fetch('/api/auth/me')
       .then((response) => response.ok ? response.json() : null)
-      .then((json) => { setCanSync(['superadmin', 'sdm'].includes(json?.user?.role)); setCanManageAttendance(['superadmin', 'sdm', 'manager', 'kepala_divisi', 'kepala_subdivisi'].includes(json?.user?.role)); })
+      .then((json) => { setCanSync(['superadmin', 'sdm'].includes(json?.user?.role)); setCanManageAttendance(['superadmin', 'sdm', 'manager', 'kepala_divisi', 'kepala_subdivisi'].includes(json?.user?.role)); setCanRecordManualPresence(json?.user?.role === 'superadmin'); })
       .catch(() => setCanSync(false));
   }, []);
 
@@ -236,6 +237,8 @@ export default function Home() {
       employee,
       type: employee.status_type || "Izin",
       reason: employee.status_reason || "",
+      checkIn: employee.manual_check_in || "",
+      checkOut: employee.manual_check_out || "",
       error: "",
     });
   };
@@ -254,6 +257,8 @@ export default function Home() {
           date: filterDate || todayInJakarta(),
           type: attendanceStatusModal.type,
           reason: attendanceStatusModal.reason,
+          check_in: attendanceStatusModal.checkIn,
+          check_out: attendanceStatusModal.checkOut,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -526,7 +531,7 @@ export default function Home() {
                       <td style={{ padding: "12px 14px", maxWidth: "320px", overflow: "hidden", textOverflow: "ellipsis", color: "var(--color-outline)", fontSize: "13px" }} title={employee.status_reason || ""}>{employee.status_reason || "—"}</td>
                       {canManageAttendance && (
                         <td style={{ padding: "12px 14px" }}>
-                          <button type="button" onClick={() => openAttendanceStatusModal(employee)}
+                          <button type="button" disabled={employee.status_type === 'Hadir' && !canRecordManualPresence} onClick={() => openAttendanceStatusModal(employee)}
                             style={{ padding: "7px 12px", border: "1px solid var(--color-primary)", borderRadius: "8px", background: "transparent", color: "var(--color-primary)", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
                             {employee.status_type ? "Ubah" : "Beri Keterangan"}
                           </button>
@@ -634,7 +639,8 @@ export default function Home() {
                     </td>
                   </tr>
                 ) : report.map((item, idx) => {
-                  const isLeave  = !!item.leave_type;
+                  const isManualPresence = item.leave_type === "Hadir";
+                  const isLeave  = !!item.leave_type && !isManualPresence;
                   const checkIn  = item.check_in ? new Date(item.check_in) : null;
                   const checkOut = item.check_out ? new Date(item.check_out) : null;
                   const same     = checkIn && checkOut && checkIn.getTime() === checkOut.getTime();
@@ -659,6 +665,7 @@ export default function Home() {
                             : <span style={{ fontWeight: 600, color: "var(--color-on-background)", fontSize: "14px" }}>{item.name}</span>
                           : <span style={{ color: "var(--color-error)", fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" }}>UID: {item.device_uid}</span>
                         }
+                        {isManualPresence && <div style={{ fontSize: "11px", color: "var(--color-outline)" }}>Hadir manual</div>}
                       </td>
                       <td style={{ padding: "12px 14px", fontSize: "13px", color: "var(--color-outline)" }}>{item.department || "-"}</td>
                       <td style={{ padding: "12px 14px" }}>
@@ -677,7 +684,7 @@ export default function Home() {
                       <td style={{ padding: "12px 14px" }}>
                         {isLeave ? (
                           <span style={{ fontSize: "12px", color: "var(--color-outline)" }}>-</span>
-                        ) : checkOut && same ? (
+                        ) : (checkOut && same) || (isManualPresence && !checkOut) ? (
                           <span style={{ fontSize: "12px", color: "var(--color-outline)", fontStyle: "italic" }}>Belum absen keluar</span>
                         ) : checkOut ? (
                           <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "4px 10px", background: "var(--color-surface-variant)", border: "1px solid #c3c6d6", color: "#434654", borderRadius: "6px", fontSize: "13px", fontWeight: 600 }}>
@@ -687,7 +694,7 @@ export default function Home() {
                         ) : "-"}
                       </td>
                       <td style={{ padding: "12px 14px", fontSize: "13px", color: "#434654", fontFamily: "'JetBrains Mono', monospace" }}>
-                        {isLeave || same ? "-" : `${durHr}j ${durMin}m`}
+                        {isLeave || same || !checkIn || !checkOut ? "-" : `${durHr}j ${durMin}m`}
                       </td>
                       <td style={{ padding: "12px 14px", fontSize: "13px", color: "var(--color-outline)", textAlign: "center" }}>
                         <span style={{ background: "var(--color-surface-container-high)", color: "var(--color-primary)", borderRadius: "12px", padding: "2px 10px", fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", fontWeight: 600 }}>
@@ -749,13 +756,17 @@ export default function Home() {
               <select id="attendance-status-type" required value={attendanceStatusModal.type}
                 onChange={(event) => setAttendanceStatusModal((current) => ({ ...current, type: event.target.value }))}
                 style={{ width: "100%", padding: "10px 12px", border: "1px solid #c3c6d6", borderRadius: "8px", color: "var(--color-on-background)", background: "var(--color-surface)" }}>
-                <option value="Hadir">Hadir (manual)</option>
+                {canRecordManualPresence && <option value="Hadir">Hadir (manual)</option>}
                 <option value="Izin">Izin</option>
                 <option value="Sakit">Sakit</option>
                 <option value="Alfa">Alfa</option>
                 <option value="Cuti">Cuti</option>
               </select>
             </div>
+            {attendanceStatusModal.type === "Hadir" && canRecordManualPresence && <>
+              <label>Jam masuk (WIB)<input required type="time" value={attendanceStatusModal.checkIn || ""} onChange={(event) => setAttendanceStatusModal((current) => ({ ...current, checkIn: event.target.value }))} style={{ display: "block", width: "100%", padding: "8px" }} /></label>
+              <label>Jam keluar (WIB, opsional)<input type="time" value={attendanceStatusModal.checkOut || ""} onChange={(event) => setAttendanceStatusModal((current) => ({ ...current, checkOut: event.target.value }))} style={{ display: "block", width: "100%", padding: "8px" }} /></label>
+            </>}
             <div>
               <label htmlFor="attendance-status-reason" style={{ display: "block", marginBottom: "6px", fontSize: "12px", fontWeight: 600, color: "var(--color-outline)" }}>Catatan (opsional)</label>
               <textarea id="attendance-status-reason" rows={3} maxLength={1000} value={attendanceStatusModal.reason}

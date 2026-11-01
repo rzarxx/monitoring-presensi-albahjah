@@ -105,8 +105,8 @@ export async function GET(request) {
              l.uid AS employee_uid,
              COALESCE(e.name, CONCAT('UID_', l.uid)) AS name,
              COALESCE(e.department, '') AS department,
-             NULL AS check_in,
-             NULL AS check_out,
+             CASE WHEN l.type = 'Hadir' AND l.manual_check_in IS NOT NULL THEN TIMESTAMP(l.date, l.manual_check_in) END AS check_in,
+             CASE WHEN l.type = 'Hadir' AND l.manual_check_out IS NOT NULL THEN TIMESTAMP(l.date, l.manual_check_out) END AS check_out,
              0 AS scan_count,
              l.type AS leave_type,
              l.reason AS leave_reason
@@ -152,7 +152,9 @@ export async function GET(request) {
       SELECT e.uid, e.name, COALESCE(e.department, '') AS department,
              MAX(l.id) AS status_id,
              MAX(l.type) AS status_type,
-             MAX(l.reason) AS status_reason
+             MAX(l.reason) AS status_reason,
+             MAX(DATE_FORMAT(l.manual_check_in, '%H:%i')) AS manual_check_in,
+             MAX(DATE_FORMAT(l.manual_check_out, '%H:%i')) AS manual_check_out
       FROM device_enrollments de
       JOIN employees e ON e.uid = de.employee_uid
       LEFT JOIN leaves l
